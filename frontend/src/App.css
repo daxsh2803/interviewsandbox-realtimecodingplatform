@@ -1,0 +1,24 @@
+.App {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  text-align: center;
+}
+
+.status-box {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  border-radius: 8px;
+  background-color: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  text-align: left;
+}
+
+.status-box pre {
+  background-color: #18181b;
+  color: #fafafa;
+  padding: 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+}
