@@ -10,7 +10,7 @@ const db = require('../db');
 exports.requireInterviewRole = (requiredRole) => {
   return async (req, res, next) => {
     try {
-      const { interviewId } = req.params;
+      const interviewId = req.params.interviewId || req.params.id;
       const userId = req.user.userId;
 
       if (!interviewId) {
@@ -46,7 +46,7 @@ exports.requireInterviewRole = (requiredRole) => {
  */
 exports.requireParticipant = async (req, res, next) => {
   try {
-    const { interviewId } = req.params;
+    const interviewId = req.params.interviewId || req.params.id;
     const userId = req.user.userId;
 
     if (!interviewId) {

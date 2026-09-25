@@ -17,15 +17,30 @@ The architecture follows a standard 3-tier model with specialized components for
 - **Ephemeral state:** Redis
 - **Infrastructure:** Docker, Docker Compose
 
-## Current Project Status: Phase 3 — Authentication & Authorization
-The platform has a functional PostgreSQL database schema and secure backend authentication in place.
-Authentication uses JWT stored in HTTP-only cookies.
+## Current Project Status: Phase 4 — Problem & Interview APIs
+The platform has a functional PostgreSQL database schema, secure authentication, and core REST APIs for managing problems and interviews.
 
 ### Authentication Endpoints
 - `POST /api/auth/register`: Register with `{ name, email, password }`
 - `POST /api/auth/login`: Login with `{ email, password }`. Sets HTTP-only `auth_token` cookie.
 - `GET /api/auth/me`: Returns the current authenticated user's profile.
 - `POST /api/auth/logout`: Clears the authentication cookie.
+
+### Problem Endpoints
+- `POST /api/problems`: Create a new problem (Requires Auth)
+- `GET /api/problems`: List all problems (Requires Auth)
+- `GET /api/problems/:id`: Get specific problem (Requires Auth)
+- `PUT /api/problems/:id`: Update a problem (Requires Auth)
+- `DELETE /api/problems/:id`: Delete a problem (Requires Auth)
+
+### Interview Endpoints
+- `POST /api/interviews`: Create an interview (User becomes INTERVIEWER)
+- `GET /api/interviews`: List interviews the user is a participant of
+- `GET /api/interviews/:id`: Get interview details (Requires participant role)
+- `POST /api/interviews/:id/participants`: Add user to interview (Requires INTERVIEWER role)
+- `POST /api/interviews/:id/problems`: Assign problem to interview (Requires INTERVIEWER role)
+- `DELETE /api/interviews/:id/problems/:problemId`: Remove problem from interview (Requires INTERVIEWER role)
+- `PATCH /api/interviews/:id/status`: Update interview status (Requires INTERVIEWER role)
 
 ### Authentication & Authorization Design
 - **Passwords** are securely hashed using `bcryptjs` and never stored in plaintext.
