@@ -22,6 +22,10 @@ export const InterviewWorkspace = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [userRole, setUserRole] = useState(null);
+  
+  // Socket and Presence state
+  const [socketStatus, setSocketStatus] = useState('Disconnected');
+  const [participants, setParticipants] = useState([]); // Array of connected participants
 
   const [activeProblemId, setActiveProblemId] = useState(null);
   
@@ -30,23 +34,59 @@ export const InterviewWorkspace = () => {
   const [problemCodeState, setProblemCodeState] = useState({}); // { [problemId]: { [lang]: code } }
 
   useEffect(() => {
-    const fetchInterview = async () => {
+    let activeSocket = null;
+
+    const fetchInterviewAndConnect = async () => {
       try {
         const data = await interviewApi.getInterviewById(id);
         const fetchedInterview = data.interview;
         setInterview(fetchedInterview);
-        
-        // Extract role (assuming current user is one of the participants returned by backend)
-        // Note: The backend getInterviewById returns `interview.participants`. 
-        // We can just rely on the API access succeeding. We don't strictly need the role for authorization (backend handles it),
-        // but we display it if we can find it, or we leave it blank.
-        // Actually backend `getInterviews` returns role, `getInterviewById` doesn't explicitly return the current user's role separately unless we look it up.
-        // For now, let's leave it as generic participant or extract if easy.
         setUserRole('Participant'); 
         
         if (fetchedInterview.problems && fetchedInterview.problems.length > 0) {
           setActiveProblemId(fetchedInterview.problems[0].id);
         }
+
+        // Connect Socket.io
+        import('../api/socketClient').then(({ getSocket }) => {
+          activeSocket = getSocket();
+          
+          activeSocket.on('connect', () => {
+            setSocketStatus('Connected');
+            activeSocket.emit('interview:join', { interviewId: id });
+          });
+
+          activeSocket.on('disconnect', () => {
+            setSocketStatus('Disconnected');
+          });
+
+          activeSocket.on('interview:joined', (payload) => {
+            console.log(payload.message);
+            // Ideally we get a list of current participants here, but for now we just mark ourselves
+          });
+
+          activeSocket.on('interview:presence', (payload) => {
+            setParticipants(prev => {
+              if (payload.connected) {
+                // Add or update
+                const existing = prev.find(p => p.userId === payload.userId);
+                if (existing) return prev;
+                return [...prev, payload];
+              } else {
+                // Remove
+                return prev.filter(p => p.userId !== payload.userId);
+              }
+            });
+          });
+
+          activeSocket.on('interview:error', (payload) => {
+            setError(payload.message);
+            activeSocket.disconnect();
+          });
+
+          activeSocket.connect();
+        });
+
       } catch (err) {
         setError(err.message || 'Failed to load interview');
       } finally {
@@ -54,7 +94,19 @@ export const InterviewWorkspace = () => {
       }
     };
     
-    fetchInterview();
+    fetchInterviewAndConnect();
+
+    return () => {
+      if (activeSocket) {
+        activeSocket.emit('interview:leave');
+        activeSocket.off('connect');
+        activeSocket.off('disconnect');
+        activeSocket.off('interview:joined');
+        activeSocket.off('interview:presence');
+        activeSocket.off('interview:error');
+        activeSocket.disconnect();
+      }
+    };
   }, [id]);
 
   // Handle active problem change and default code initialization
@@ -98,7 +150,12 @@ export const InterviewWorkspace = () => {
 
   return (
     <div className="workspace-layout">
-      <WorkspaceHeader interview={interview} userRole={userRole} />
+      <WorkspaceHeader 
+        interview={interview} 
+        userRole={userRole} 
+        socketStatus={socketStatus}
+        participants={participants}
+      />
       
       <div className="workspace-main">
         <div className="workspace-left">

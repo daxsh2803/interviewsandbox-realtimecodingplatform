@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
-export const WorkspaceHeader = ({ interview, userRole }) => {
+export const WorkspaceHeader = ({ interview, userRole, socketStatus, participants = [] }) => {
   const navigate = useNavigate();
 
   return (
@@ -16,6 +16,21 @@ export const WorkspaceHeader = ({ interview, userRole }) => {
       </div>
       
       <div className="workspace-header-right">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginRight: '1rem', borderRight: '1px solid var(--border-color)', paddingRight: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+            <span style={{
+              width: '8px', height: '8px', borderRadius: '50%',
+              backgroundColor: socketStatus === 'Connected' ? '#4ade80' : '#f87171'
+            }}></span>
+            {socketStatus}
+          </div>
+          {participants.length > 0 && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              {participants.length} Active {participants.length === 1 ? 'User' : 'Users'}
+            </div>
+          )}
+        </div>
+
         {interview && (
           <>
             <span className={`status-badge status-${interview.status.toLowerCase()}`}>

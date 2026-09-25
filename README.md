@@ -17,8 +17,8 @@ The architecture follows a standard 3-tier model with specialized components for
 - **Ephemeral state:** Redis
 - **Infrastructure:** Docker, Docker Compose
 
-## Current Project Status: Phase 6 — Monaco Editor & Interview Workspace
-The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs, a React frontend foundation, and a fully functional single-user Interview Workspace featuring the Monaco Editor.
+## Current Project Status: Phase 7 — Socket.io Real-Time Transport
+The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs, a React frontend foundation, and a fully functional single-user Interview Workspace featuring the Monaco Editor, now backed by a Socket.io real-time transport layer.
 
 ### Authentication Endpoints
 - `POST /api/auth/register`: Register with `{ name, email, password }`
@@ -56,7 +56,13 @@ The frontend is built with React, Vite, and React Router, featuring a custom van
 - **Monaco Editor**: Integrated `@monaco-editor/react`. Currently supports JavaScript, Python, Java, C++, and C for syntax highlighting.
 - **Problem Panel**: Fetches and renders problems assigned to the specific interview.
 - **Execution Panel**: UI placeholders for code execution, indicating future integration points with Judge0.
-- *Note: Collaborative synchronization (Yjs), live sockets, and backend execution are explicitly NOT implemented yet.*
+### Socket.io Real-Time Architecture
+- **Transport**: `socket.io` provides real-time bi-directional transport natively bridging with the Express HTTP server.
+- **Authentication**: JWT is securely transferred via HTTP-only cookie automatically during handshake. Unauthenticated socket connections are rejected.
+- **Authorization**: The server explicitly checks `interview_participants` in PostgreSQL before permitting a socket to join a room (`interview:<id>`).
+- **Presence**: Tracks and broadcasts connected users (`interview:presence`). Currently in-memory and limited to a single backend instance (Redis integration pending).
+- **Events**: `interview:join`, `interview:leave`, `interview:joined`, `interview:presence`, `interview:error`.
+- *Note: Collaborative synchronization (Yjs), distributed locks, and backend execution are explicitly NOT implemented yet.*
 
 ### Authentication & Authorization Design
 - **Passwords** are securely hashed using `bcryptjs` and never stored in plaintext.
