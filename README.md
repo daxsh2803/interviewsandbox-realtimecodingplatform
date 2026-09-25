@@ -17,8 +17,8 @@ The architecture follows a standard 3-tier model with specialized components for
 - **Ephemeral state:** Redis
 - **Infrastructure:** Docker, Docker Compose
 
-## Current Project Status: Phase 5 — Frontend Foundation & Authentication UI
-The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs for managing problems and interviews, and a React frontend foundation with authentication flows.
+## Current Project Status: Phase 6 — Monaco Editor & Interview Workspace
+The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs, a React frontend foundation, and a fully functional single-user Interview Workspace featuring the Monaco Editor.
 
 ### Authentication Endpoints
 - `POST /api/auth/register`: Register with `{ name, email, password }`
@@ -49,7 +49,14 @@ The frontend is built with React, Vite, and React Router, featuring a custom van
 - **Routes**:
   - `/login`: Public route for user authentication.
   - `/register`: Public route for account creation.
-  - `/dashboard`: Protected route requiring authentication, displays user profile and serves as the launchpad for interview rooms (upcoming).
+  - `/dashboard`: Protected route requiring authentication, displays user profile and scheduled interviews.
+  - `/interviews/:id`: Protected workspace environment containing the coding interface.
+
+### Workspace & Editor Configuration
+- **Monaco Editor**: Integrated `@monaco-editor/react`. Currently supports JavaScript, Python, Java, C++, and C for syntax highlighting.
+- **Problem Panel**: Fetches and renders problems assigned to the specific interview.
+- **Execution Panel**: UI placeholders for code execution, indicating future integration points with Judge0.
+- *Note: Collaborative synchronization (Yjs), live sockets, and backend execution are explicitly NOT implemented yet.*
 
 ### Authentication & Authorization Design
 - **Passwords** are securely hashed using `bcryptjs` and never stored in plaintext.

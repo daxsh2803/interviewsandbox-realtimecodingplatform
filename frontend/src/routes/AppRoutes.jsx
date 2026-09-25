@@ -4,6 +4,7 @@ import { MainLayout, ProtectedRoute } from '../layouts/MainLayout';
 import { Login } from '../pages/Login';
 import { Register } from '../pages/Register';
 import { Dashboard } from '../pages/Dashboard';
+import { InterviewWorkspace } from '../pages/InterviewWorkspace';
 import { useAuth } from '../context/AuthContext';
 
 export const AppRoutes = () => {
@@ -33,6 +34,16 @@ export const AppRoutes = () => {
           } 
         />
       </Route>
+
+      {/* Standalone protected route for workspace (no MainLayout wrapper) */}
+      <Route 
+        path="/interviews/:id" 
+        element={
+          <ProtectedRoute>
+            <InterviewWorkspace />
+          </ProtectedRoute>
+        } 
+      />
 
       {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
