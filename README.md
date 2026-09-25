@@ -17,8 +17,8 @@ The architecture follows a standard 3-tier model with specialized components for
 - **Ephemeral state:** Redis
 - **Infrastructure:** Docker, Docker Compose
 
-## Current Project Status: Phase 4 — Problem & Interview APIs
-The platform has a functional PostgreSQL database schema, secure authentication, and core REST APIs for managing problems and interviews.
+## Current Project Status: Phase 5 — Frontend Foundation & Authentication UI
+The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs for managing problems and interviews, and a React frontend foundation with authentication flows.
 
 ### Authentication Endpoints
 - `POST /api/auth/register`: Register with `{ name, email, password }`
@@ -41,6 +41,15 @@ The platform has a functional PostgreSQL database schema, secure authentication,
 - `POST /api/interviews/:id/problems`: Assign problem to interview (Requires INTERVIEWER role)
 - `DELETE /api/interviews/:id/problems/:problemId`: Remove problem from interview (Requires INTERVIEWER role)
 - `PATCH /api/interviews/:id/status`: Update interview status (Requires INTERVIEWER role)
+
+### Frontend Architecture & Routing
+The frontend is built with React, Vite, and React Router, featuring a custom vanilla CSS design system (glassmorphism & dark mode).
+- **Global AuthContext**: Manages user state, login, registration, and logout. Automatically verifies session on load via `/api/auth/me`.
+- **API Client**: A centralized Axios-style fetch wrapper that natively includes HTTP-only credentials.
+- **Routes**:
+  - `/login`: Public route for user authentication.
+  - `/register`: Public route for account creation.
+  - `/dashboard`: Protected route requiring authentication, displays user profile and serves as the launchpad for interview rooms (upcoming).
 
 ### Authentication & Authorization Design
 - **Passwords** are securely hashed using `bcryptjs` and never stored in plaintext.
