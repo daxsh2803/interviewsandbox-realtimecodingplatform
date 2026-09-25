@@ -17,9 +17,25 @@ The architecture follows a standard 3-tier model with specialized components for
 - **Ephemeral state:** Redis
 - **Infrastructure:** Docker, Docker Compose
 
-## Current Project Status: Phase 0 — Project Foundation
-The project currently has its structural foundation. It contains a minimal Express application with a health check, a minimal React/Vite application, and Docker Compose configuration for PostgreSQL and Redis.
-Authentication, database models, live coding, and Judge0 are not yet implemented.
+## Current Project Status: Phase 3 — Authentication & Authorization
+The platform has a functional PostgreSQL database schema and secure backend authentication in place.
+Authentication uses JWT stored in HTTP-only cookies.
+
+### Authentication Endpoints
+- `POST /api/auth/register`: Register with `{ name, email, password }`
+- `POST /api/auth/login`: Login with `{ email, password }`. Sets HTTP-only `auth_token` cookie.
+- `GET /api/auth/me`: Returns the current authenticated user's profile.
+- `POST /api/auth/logout`: Clears the authentication cookie.
+
+### Authentication & Authorization Design
+- **Passwords** are securely hashed using `bcryptjs` and never stored in plaintext.
+- **JWTs** do not store sensitive information (e.g., passwords).
+- **Cookies** are used to transport JWTs with `httpOnly`, `secure` (in prod), and `sameSite` flags.
+- **Role-based Authorization** is implemented via middleware to restrict access based on user roles within specific interviews (`interview_participants` table), rather than global user roles.
+
+### Environment Variables
+The `.env` file requires the following authentication variable:
+- `JWT_SECRET`: Secret used to sign JSON Web Tokens. Must be kept secure and configured per environment.
 
 ## Development Prerequisites
 - Node.js (v18+)
