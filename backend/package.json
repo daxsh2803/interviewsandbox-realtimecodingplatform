@@ -21,7 +21,8 @@
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.13.0",
     "redis": "^4.7.0",
-    "socket.io": "^4.8.4"
+    "socket.io": "^4.8.4",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "jest": "^30.5.2",

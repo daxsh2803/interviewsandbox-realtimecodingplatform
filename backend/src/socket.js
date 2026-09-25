@@ -2,6 +2,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const config = require('./config');
 const db = require('./db');
+const { registerYjsHandlers, cleanupSocketFromDocs } = require('./yjsManager');
 
 let io;
 
@@ -85,6 +86,9 @@ const initSocket = (httpServer) => {
       }
     });
 
+    // Register Yjs handlers for the socket
+    registerYjsHandlers(socket);
+
     // Leave Interview Room
     socket.on('interview:leave', () => {
       const { interviewId, userId, role } = socket.data;
@@ -99,6 +103,7 @@ const initSocket = (httpServer) => {
         
         socket.data.interviewId = null;
         socket.data.role = null;
+        cleanupSocketFromDocs(socket.id);
       }
     });
 
@@ -113,6 +118,7 @@ const initSocket = (httpServer) => {
           connected: false,
         });
       }
+      cleanupSocketFromDocs(socket.id);
     });
   });
 

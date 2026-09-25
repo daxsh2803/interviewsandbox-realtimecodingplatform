@@ -1,22 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { interviewApi } from '../api/interviewApi';
 import { WorkspaceHeader } from '../components/WorkspaceHeader';
 import { ProblemPanel } from '../components/ProblemPanel';
 import { CodeEditor } from '../components/CodeEditor';
 import { ExecutionPanel } from '../components/ExecutionPanel';
-
-// Temporary local state structure for phase 6
-const DEFAULT_CODE = {
-  javascript: '// Write your JavaScript code here\n',
-  python: '# Write your Python code here\n',
-  java: '// Write your Java code here\n',
-  cpp: '// Write your C++ code here\n',
-  c: '// Write your C code here\n',
-};
+import { useYjsProvider } from '../api/useYjsProvider';
 
 export const InterviewWorkspace = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   
   const [interview, setInterview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +24,6 @@ export const InterviewWorkspace = () => {
   
   // Editor state
   const [language, setLanguage] = useState('javascript');
-  const [problemCodeState, setProblemCodeState] = useState({}); // { [problemId]: { [lang]: code } }
 
   useEffect(() => {
     let activeSocket = null;
@@ -62,7 +54,6 @@ export const InterviewWorkspace = () => {
 
           activeSocket.on('interview:joined', (payload) => {
             console.log(payload.message);
-            // Ideally we get a list of current participants here, but for now we just mark ourselves
           });
 
           activeSocket.on('interview:presence', (payload) => {
@@ -109,21 +100,12 @@ export const InterviewWorkspace = () => {
     };
   }, [id]);
 
-  // Handle active problem change and default code initialization
+  // Hook into Yjs doc for active problem
+  const yDoc = useYjsProvider(id, activeProblemId, socketStatus);
+
+  // Handle active problem change
   const handleProblemChange = (probId) => {
     setActiveProblemId(probId);
-  };
-
-  const currentCode = problemCodeState[activeProblemId]?.[language] ?? DEFAULT_CODE[language];
-
-  const handleCodeChange = (newCode) => {
-    setProblemCodeState(prev => ({
-      ...prev,
-      [activeProblemId]: {
-        ...(prev[activeProblemId] || {}),
-        [language]: newCode
-      }
-    }));
   };
 
   if (loading) {
@@ -140,7 +122,7 @@ export const InterviewWorkspace = () => {
         <div className="glass-card" style={{ textAlign: 'center' }}>
           <h2>Access Error</h2>
           <div className="alert alert-error">{error}</div>
-          <button className="btn btn-primary" onClick={() => window.location.href = '/dashboard'}>
+          <button className="btn btn-primary" onClick={() => navigate('/dashboard')}>
             Return to Dashboard
           </button>
         </div>
@@ -170,12 +152,11 @@ export const InterviewWorkspace = () => {
           <CodeEditor 
             language={language}
             setLanguage={setLanguage}
-            sourceCode={currentCode}
-            setSourceCode={handleCodeChange}
+            yDoc={yDoc}
           />
           <ExecutionPanel />
         </div>
       </div>
     </div>
   );
-};
+}

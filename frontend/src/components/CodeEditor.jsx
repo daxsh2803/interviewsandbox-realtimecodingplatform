@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
+import { MonacoBinding } from 'y-monaco';
 
 const LANGUAGES = [
   { id: 'javascript', name: 'JavaScript' },
@@ -9,11 +10,38 @@ const LANGUAGES = [
   { id: 'c', name: 'C' }
 ];
 
-export const CodeEditor = ({ language, setLanguage, sourceCode, setSourceCode }) => {
-  
+export const CodeEditor = ({ language, setLanguage, yDoc }) => {
+  const editorRef = useRef(null);
+  const bindingRef = useRef(null);
+
   const handleLanguageChange = (e) => {
     setLanguage(e.target.value);
   };
+
+  const handleEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
+    if (yDoc) {
+      const type = yDoc.getText('sourceCode');
+      bindingRef.current = new MonacoBinding(type, editor.getModel(), new Set([editor]), null);
+    }
+  };
+
+  useEffect(() => {
+    if (editorRef.current && yDoc) {
+      // If yDoc changes, rebind
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+      }
+      const type = yDoc.getText('sourceCode');
+      bindingRef.current = new MonacoBinding(type, editorRef.current.getModel(), new Set([editorRef.current]), null);
+    }
+    return () => {
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+        bindingRef.current = null;
+      }
+    };
+  }, [yDoc]);
 
   return (
     <div className="code-editor-container">
@@ -28,7 +56,7 @@ export const CodeEditor = ({ language, setLanguage, sourceCode, setSourceCode })
             <option key={lang.id} value={lang.id}>{lang.name}</option>
           ))}
         </select>
-        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Local mode only (Phase 6)</span>
+        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Collaborative Mode (Phase 8)</span>
       </div>
       
       <div className="editor-wrapper">
@@ -37,8 +65,7 @@ export const CodeEditor = ({ language, setLanguage, sourceCode, setSourceCode })
           width="100%"
           theme="vs-dark"
           language={language}
-          value={sourceCode}
-          onChange={(value) => setSourceCode(value)}
+          onMount={handleEditorMount}
           options={{
             minimap: { enabled: false },
             fontSize: 14,
