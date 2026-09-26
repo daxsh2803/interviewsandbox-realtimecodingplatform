@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const ProblemPanel = ({ problems, activeProblemId, onProblemChange }) => {
+export const ProblemPanel = ({ problems, activeProblemId, onProblemChange, isInterviewer }) => {
   if (!problems || problems.length === 0) {
     return (
       <div className="problem-panel">
@@ -20,8 +20,9 @@ export const ProblemPanel = ({ problems, activeProblemId, onProblemChange }) => 
           {problems.map(p => (
             <button
               key={p.id}
-              className={`problem-tab ${activeProblemId === p.id ? 'active' : ''}`}
-              onClick={() => onProblemChange(p.id)}
+              className={`problem-tab ${activeProblemId === p.id ? 'active' : ''} ${!isInterviewer ? 'disabled' : ''}`}
+              onClick={() => isInterviewer && onProblemChange(p.id)}
+              disabled={!isInterviewer}
             >
               {p.title}
             </button>

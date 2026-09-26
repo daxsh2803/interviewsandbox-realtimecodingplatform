@@ -15,10 +15,12 @@ export const InterviewWorkspace = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [userRole, setUserRole] = useState(null);
+  const [editorLocked, setEditorLocked] = useState(false);
+  const [activities, setActivities] = useState([]);
   
   // Socket and Presence state
   const [socketStatus, setSocketStatus] = useState('Disconnected');
-  const [participants, setParticipants] = useState([]); // Array of connected participants
+  const [participants, setParticipants] = useState([]);
 
   const [activeProblemId, setActiveProblemId] = useState(null);
   
@@ -33,10 +35,34 @@ export const InterviewWorkspace = () => {
         const data = await interviewApi.getInterviewById(id);
         const fetchedInterview = data.interview;
         setInterview(fetchedInterview);
-        setUserRole('Participant'); 
         
-        if (fetchedInterview.problems && fetchedInterview.problems.length > 0) {
-          setActiveProblemId(fetchedInterview.problems[0].id);
+        // Find current user's role from auth context (simplified: we check if they are interviewer)
+        const currentUser = fetchedInterview.participants.find(p => p.role === 'INTERVIEWER') 
+          || fetchedInterview.participants[0]; 
+        // In a real app with auth context, we match by user ID. 
+        // For this phase, we'll try to get it correctly from the backend by assuming backend verifies token.
+        // Actually, let's fetch current user info or assume 'Participant' is default unless we fetch role.
+        // Wait, `authApi.me()` could get user. Let's assume the user is INTERVIEWER if they created it, but we need real check.
+        // I will use a simple check: if we can fetch lock, we are maybe interviewer?
+        // Let's just rely on the API. The API returns `participants` with `id`. We don't have current userId.
+        // I'll add an auth API call to get user role, but for now I'll just check if we can call lock endpoint.
+        
+        try {
+          const lockData = await interviewApi.getLock(id);
+          setEditorLocked(lockData.locked);
+        } catch (e) {}
+
+        try {
+          const activeProbData = await interviewApi.getActiveProblem(id);
+          if (activeProbData.problemId) {
+            setActiveProblemId(activeProbData.problemId);
+          } else if (fetchedInterview.problems && fetchedInterview.problems.length > 0) {
+            setActiveProblemId(fetchedInterview.problems[0].id);
+          }
+        } catch (e) {
+          if (fetchedInterview.problems && fetchedInterview.problems.length > 0) {
+            setActiveProblemId(fetchedInterview.problems[0].id);
+          }
         }
 
         // Connect Socket.io
@@ -59,15 +85,27 @@ export const InterviewWorkspace = () => {
           activeSocket.on('interview:presence', (payload) => {
             setParticipants(prev => {
               if (payload.connected) {
-                // Add or update
                 const existing = prev.find(p => p.userId === payload.userId);
                 if (existing) return prev;
                 return [...prev, payload];
               } else {
-                // Remove
                 return prev.filter(p => p.userId !== payload.userId);
               }
             });
+          });
+
+          activeSocket.on('interview:editor-lock', (payload) => setEditorLocked(true));
+          activeSocket.on('interview:editor-unlock', (payload) => setEditorLocked(false));
+          
+          activeSocket.on('problem:pushed', (payload) => setActiveProblemId(payload.problemId));
+          
+          activeSocket.on('interview:ended', (payload) => {
+            setInterview(prev => ({ ...prev, status: 'COMPLETED' }));
+            setEditorLocked(true); // Ensure editor locks locally
+          });
+
+          activeSocket.on('interview:activity', (payload) => {
+            setActivities(prev => [payload, ...prev].slice(0, 50));
           });
 
           activeSocket.on('interview:error', (payload) => {
@@ -86,6 +124,15 @@ export const InterviewWorkspace = () => {
     };
     
     fetchInterviewAndConnect();
+    // Also fetch current user to know if they are interviewer. We'll fetch from /api/auth/me
+    import('../api/client').then(({ apiClient }) => {
+      apiClient('/auth/me').then(res => {
+        apiClient(`/interviews/${id}`).then(intData => {
+          const participant = intData.interview.participants.find(p => p.id === res.user.id);
+          if (participant) setUserRole(participant.role);
+        });
+      }).catch(e => console.error(e));
+    });
 
     return () => {
       if (activeSocket) {
@@ -94,18 +141,45 @@ export const InterviewWorkspace = () => {
         activeSocket.off('disconnect');
         activeSocket.off('interview:joined');
         activeSocket.off('interview:presence');
+        activeSocket.off('interview:editor-lock');
+        activeSocket.off('interview:editor-unlock');
+        activeSocket.off('problem:pushed');
+        activeSocket.off('interview:ended');
+        activeSocket.off('interview:activity');
         activeSocket.off('interview:error');
         activeSocket.disconnect();
       }
     };
   }, [id]);
 
-  // Hook into Yjs doc for active problem
   const yDoc = useYjsProvider(id, activeProblemId, socketStatus);
 
-  // Handle active problem change
-  const handleProblemChange = (probId) => {
-    setActiveProblemId(probId);
+  const handleProblemChange = async (probId) => {
+    if (userRole === 'INTERVIEWER') {
+      try {
+        await interviewApi.setActiveProblem(id, probId);
+        setActiveProblemId(probId);
+      } catch (err) {
+        console.error('Failed to set active problem:', err);
+      }
+    }
+  };
+
+  const toggleLock = async () => {
+    try {
+      await interviewApi.setLock(id, !editorLocked);
+    } catch (err) {
+      console.error('Failed to toggle lock:', err);
+    }
+  };
+
+  const updateStatus = async (status) => {
+    try {
+      const res = await interviewApi.updateStatus(id, status);
+      setInterview(prev => ({ ...prev, status: res.interview.status }));
+    } catch (err) {
+      console.error('Failed to update status:', err);
+    }
   };
 
   if (loading) {
@@ -130,6 +204,8 @@ export const InterviewWorkspace = () => {
     );
   }
 
+  const isCompleted = interview?.status === 'COMPLETED' || interview?.status === 'CANCELLED';
+
   return (
     <div className="workspace-layout">
       <WorkspaceHeader 
@@ -139,12 +215,42 @@ export const InterviewWorkspace = () => {
         participants={participants}
       />
       
+      {userRole === 'INTERVIEWER' && (
+        <div style={{ padding: '0.5rem 1rem', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <strong>Interviewer Controls:</strong>
+          {interview.status === 'SCHEDULED' && (
+            <button className="btn btn-success" onClick={() => updateStatus('IN_PROGRESS')} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>Start Interview</button>
+          )}
+          {interview.status === 'IN_PROGRESS' && (
+            <button className="btn btn-error" onClick={() => updateStatus('COMPLETED')} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>End Interview</button>
+          )}
+          <button 
+            className={`btn ${editorLocked ? 'btn-success' : 'btn-primary'}`} 
+            onClick={toggleLock}
+            disabled={isCompleted}
+            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+          >
+            {editorLocked ? 'Unlock Editor' : 'Lock Editor'}
+          </button>
+          <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            Activity Events: {activities.length > 0 ? `${activities[0].type} at ${new Date(activities[0].timestamp).toLocaleTimeString()}` : 'None'}
+          </div>
+        </div>
+      )}
+
+      {isCompleted && (
+        <div style={{ padding: '0.5rem 1rem', background: 'var(--error-color)', color: 'white', textAlign: 'center', fontWeight: 'bold' }}>
+          This interview has ended.
+        </div>
+      )}
+      
       <div className="workspace-main">
         <div className="workspace-left">
           <ProblemPanel 
             problems={interview.problems} 
             activeProblemId={activeProblemId}
             onProblemChange={handleProblemChange}
+            isInterviewer={userRole === 'INTERVIEWER'}
           />
         </div>
         
@@ -153,12 +259,14 @@ export const InterviewWorkspace = () => {
             language={language}
             setLanguage={setLanguage}
             yDoc={yDoc}
+            readOnly={editorLocked || isCompleted}
           />
           <ExecutionPanel 
             yDoc={yDoc}
             language={language}
             interviewId={interview.id}
             problemId={activeProblemId}
+            disabled={isCompleted}
           />
         </div>
       </div>

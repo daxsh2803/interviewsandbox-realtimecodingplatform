@@ -202,6 +202,15 @@ exports.updateStatus = async (req, res, next) => {
       return res.json({ message: 'Status is already set to this value' });
     }
 
+    // Lifecycle constraints
+    if (status === 'IN_PROGRESS' && (currentStatus === 'COMPLETED' || currentStatus === 'CANCELLED')) {
+      return res.status(400).json({ error: 'Cannot start an already completed or cancelled interview' });
+    }
+    
+    if (status === 'COMPLETED' && currentStatus !== 'IN_PROGRESS') {
+      return res.status(400).json({ error: 'Cannot end an interview that is not in progress' });
+    }
+
     let query = 'UPDATE interviews SET status = $1, updated_at = CURRENT_TIMESTAMP';
     const params = [status, id];
 
@@ -214,9 +223,161 @@ exports.updateStatus = async (req, res, next) => {
     query += ' WHERE id = $2 RETURNING *';
 
     const result = await db.query(query, params);
+    const updatedInterview = result.rows[0];
 
-    res.json({ interview: result.rows[0] });
+    // Handle COMPLETED side effects
+    if (status === 'COMPLETED') {
+      const { getIo } = require('../socket');
+      const { redisClient } = require('../db/redis');
+      const { docs } = require('../yjsManager');
+      
+      // Save snapshots BEFORE cleanup
+      const problemRes = await db.query('SELECT problem_id FROM interview_problems WHERE interview_id = $1', [id]);
+      for (const row of problemRes.rows) {
+        const docId = `${id}:${row.problem_id}`;
+        const doc = docs.get(docId);
+        if (doc) {
+          const sourceCode = doc.getText('sourceCode').toString();
+          if (sourceCode) {
+            await db.query(
+              `INSERT INTO interview_snapshots (interview_id, snapshot_content, language, trigger_type) 
+               VALUES ($1, $2, $3, $4)`,
+              [id, sourceCode, 'javascript', 'TERMINATION']
+            );
+          }
+        }
+      }
+      
+      // Clean ephemeral state
+      await redisClient.del(`interview:${id}:editor:lock`);
+      await redisClient.del(`interview:${id}:active-problem`);
+      
+      // Emit ended event
+      const io = getIo();
+      if (io) {
+        io.to(`interview:${id}`).emit('interview:ended', { 
+          interviewId: id,
+          status: 'COMPLETED'
+        });
+      }
+    }
+
+    res.json({ interview: updatedInterview });
   } catch (error) {
     next(error);
   }
 };
+
+exports.setLock = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { locked } = req.body;
+    
+    if (typeof locked !== 'boolean') {
+      return res.status(400).json({ error: 'locked must be a boolean' });
+    }
+
+    const { redisClient } = require('../db/redis');
+    const lockKey = `interview:${id}:editor:lock`;
+    
+    if (locked) {
+      await redisClient.set(lockKey, 'locked');
+    } else {
+      await redisClient.del(lockKey);
+    }
+    
+    const { getIo } = require('../socket');
+    const io = getIo();
+    if (io) {
+      io.to(`interview:${id}`).emit(locked ? 'interview:editor-lock' : 'interview:editor-unlock', {
+        interviewId: id,
+        locked
+      });
+      // Candidate activity event for interviewer
+      io.to(`interview:${id}`).emit('interview:activity', {
+        type: 'editor_lock',
+        locked,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.json({ locked });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getLock = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { redisClient } = require('../db/redis');
+    const lockKey = `interview:${id}:editor:lock`;
+    
+    const lockState = await redisClient.get(lockKey);
+    const locked = lockState === 'locked';
+
+    res.json({ locked });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.setActiveProblem = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { problemId } = req.body;
+
+    if (!problemId) {
+      return res.status(400).json({ error: 'problemId is required' });
+    }
+
+    // Verify problem belongs to interview
+    const problemResult = await db.query(
+      'SELECT * FROM interview_problems WHERE interview_id = $1 AND problem_id = $2',
+      [id, problemId]
+    );
+
+    if (problemResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Problem is not assigned to this interview' });
+    }
+
+    const { redisClient } = require('../db/redis');
+    const problemKey = `interview:${id}:active-problem`;
+    
+    await redisClient.set(problemKey, problemId);
+
+    const { getIo } = require('../socket');
+    const io = getIo();
+    if (io) {
+      io.to(`interview:${id}`).emit('problem:pushed', {
+        interviewId: id,
+        problemId
+      });
+      // Candidate activity event
+      io.to(`interview:${id}`).emit('interview:activity', {
+        type: 'problem_pushed',
+        problemId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.json({ problemId });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getActiveProblem = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { redisClient } = require('../db/redis');
+    const problemKey = `interview:${id}:active-problem`;
+    
+    const problemId = await redisClient.get(problemKey);
+
+    res.json({ problemId });
+  } catch (error) {
+    next(error);
+  }
+};
+

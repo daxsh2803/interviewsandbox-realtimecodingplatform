@@ -43,7 +43,7 @@ const cleanupSocketFromDocs = (socketId) => {
  */
 const registerYjsHandlers = (socket) => {
   // yjs:sync-step1: Client sends their state vector so server can compute missing updates
-  socket.on('yjs:sync-step1', (payload) => {
+  socket.on('yjs:sync-step1', async (payload) => {
     try {
       const { interviewId, problemId, stateVector } = payload;
       
@@ -54,6 +54,21 @@ const registerYjsHandlers = (socket) => {
 
       if (!problemId) {
         return socket.emit('yjs:error', { message: 'problemId is required' });
+      }
+
+      const { redisClient } = require('./db/redis');
+      const lockKey = `interview:${interviewId}:editor:lock`;
+      const lockState = await redisClient.get(lockKey);
+
+      if (lockState === 'locked' && socket.data.role !== 'INTERVIEWER') {
+        return socket.emit('yjs:error', { message: 'Editor is currently locked by interviewer' });
+      }
+
+      // Also check if interview is ended
+      const db = require('./db');
+      const statusRes = await db.query('SELECT status FROM interviews WHERE id = $1', [interviewId]);
+      if (statusRes.rows.length === 0 || statusRes.rows[0].status === 'COMPLETED' || statusRes.rows[0].status === 'CANCELLED') {
+         return socket.emit('yjs:error', { message: 'Interview is no longer active' });
       }
 
       const doc = getDoc(interviewId, problemId);
@@ -76,13 +91,27 @@ const registerYjsHandlers = (socket) => {
   });
 
   // yjs:update: Client sends a document update
-  socket.on('yjs:update', (payload) => {
+  socket.on('yjs:update', async (payload) => {
     try {
       const { interviewId, problemId, update } = payload;
       
       // Ensure the socket is authorized
       if (socket.data.interviewId !== interviewId) {
         return socket.emit('yjs:error', { message: 'Unauthorized for this interview document' });
+      }
+
+      const { redisClient } = require('./db/redis');
+      const lockKey = `interview:${interviewId}:editor:lock`;
+      const lockState = await redisClient.get(lockKey);
+
+      if (lockState === 'locked' && socket.data.role !== 'INTERVIEWER') {
+        return socket.emit('yjs:error', { message: 'Editor is currently locked by interviewer' });
+      }
+
+      const db = require('./db');
+      const statusRes = await db.query('SELECT status FROM interviews WHERE id = $1', [interviewId]);
+      if (statusRes.rows.length === 0 || statusRes.rows[0].status === 'COMPLETED' || statusRes.rows[0].status === 'CANCELLED') {
+         return socket.emit('yjs:error', { message: 'Interview is no longer active' });
       }
 
       const doc = getDoc(interviewId, problemId);

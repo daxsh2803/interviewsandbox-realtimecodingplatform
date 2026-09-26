@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { apiClient } from '../api/client';
 import { getSocket } from '../api/socketClient';
 
-export const ExecutionPanel = ({ yDoc, language, interviewId, problemId }) => {
+export const ExecutionPanel = ({ yDoc, language, interviewId, problemId, disabled = false }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executionResult, setExecutionResult] = useState(null);
@@ -90,7 +90,7 @@ export const ExecutionPanel = ({ yDoc, language, interviewId, problemId }) => {
         <button 
           className="btn btn-primary" 
           onClick={handleRunCode}
-          disabled={isRunning || isSubmitting || !yDoc || !problemId}
+          disabled={disabled || isRunning || isSubmitting || !yDoc || !problemId}
           style={{ padding: '0.4rem 1rem', fontSize: '0.875rem' }}
         >
           {isRunning ? 'Running...' : 'Run Code'}
@@ -98,8 +98,8 @@ export const ExecutionPanel = ({ yDoc, language, interviewId, problemId }) => {
         <button 
           className="btn btn-success" 
           onClick={handleSubmitCode}
-          disabled={isRunning || isSubmitting || !yDoc || !problemId}
-          style={{ padding: '0.4rem 1rem', fontSize: '0.875rem', backgroundColor: 'var(--success-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: (isRunning || isSubmitting || !yDoc || !problemId) ? 'not-allowed' : 'pointer' }}
+          disabled={disabled || isRunning || isSubmitting || !yDoc || !problemId}
+          style={{ padding: '0.4rem 1rem', fontSize: '0.875rem', backgroundColor: 'var(--success-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: (disabled || isRunning || isSubmitting || !yDoc || !problemId) ? 'not-allowed' : 'pointer' }}
         >
           {isSubmitting ? 'Evaluating...' : 'Submit'}
         </button>

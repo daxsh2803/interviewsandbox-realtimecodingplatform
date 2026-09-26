@@ -21,15 +21,20 @@ exports.executeCode = async (req, res, next) => {
 
     // Verify user is part of the interview and problem is part of the interview
     const interviewRes = await db.query(
-      `SELECT ip.role 
+      `SELECT ip.role, i.status 
        FROM interview_participants ip 
        JOIN interview_problems iprob ON ip.interview_id = iprob.interview_id
+       JOIN interviews i ON ip.interview_id = i.id
        WHERE ip.interview_id = $1 AND ip.user_id = $2 AND iprob.problem_id = $3`,
       [interviewId, userId, problemId]
     );
 
     if (interviewRes.rowCount === 0) {
       return res.status(403).json({ error: 'Not authorized for this interview or problem not assigned.' });
+    }
+
+    if (interviewRes.rows[0].status === 'COMPLETED' || interviewRes.rows[0].status === 'CANCELLED') {
+      return res.status(403).json({ error: 'Interview is no longer active.' });
     }
 
     // Create execution record in DB
@@ -63,6 +68,15 @@ exports.executeCode = async (req, res, next) => {
           });
         }
       });
+
+    const io = getSocketIo();
+    if (io) {
+      io.to(`interview:${interviewId}`).emit('interview:activity', {
+        type: 'execution_started',
+        userId,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Return 202 immediately
     return res.status(202).json({
@@ -125,6 +139,11 @@ exports.judge0Callback = async (req, res, next) => {
           stderr: finalStderr,
           executionTimeMs: time ? Math.round(parseFloat(time) * 1000) : null,
           memoryBytes: memory
+        });
+        io.to(`interview:${interview_id}`).emit('interview:activity', {
+          type: 'execution_completed',
+          status: appStatus,
+          timestamp: new Date().toISOString()
         });
       }
     }

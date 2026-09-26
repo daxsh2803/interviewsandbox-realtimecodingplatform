@@ -20,6 +20,12 @@ router.post('/:id/problems', interviewerOnly, interviewController.assignProblem)
 router.delete('/:id/problems/:problemId', interviewerOnly, interviewController.removeProblem);
 router.patch('/:id/status', interviewerOnly, interviewController.updateStatus);
 
+router.post('/:id/lock', interviewerOnly, interviewController.setLock);
+router.get('/:id/lock', requireParticipant, interviewController.getLock);
+
+router.post('/:id/active-problem', interviewerOnly, interviewController.setActiveProblem);
+router.get('/:id/active-problem', requireParticipant, interviewController.getActiveProblem);
+
 const executionController = require('../controllers/executionController');
 const submissionController = require('../controllers/submissionController');
 const testCaseController = require('../controllers/testCaseController');

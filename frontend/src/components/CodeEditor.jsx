@@ -10,7 +10,7 @@ const LANGUAGES = [
   { id: 'c', name: 'C' }
 ];
 
-export const CodeEditor = ({ language, setLanguage, yDoc }) => {
+export const CodeEditor = ({ language, setLanguage, yDoc, readOnly = false }) => {
   const editorRef = useRef(null);
   const bindingRef = useRef(null);
 
@@ -72,7 +72,8 @@ export const CodeEditor = ({ language, setLanguage, yDoc }) => {
             lineHeight: 22,
             padding: { top: 16 },
             scrollBeyondLastLine: false,
-            wordWrap: 'on'
+            wordWrap: 'on',
+            readOnly: readOnly
           }}
         />
       </div>

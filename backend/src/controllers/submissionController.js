@@ -75,6 +75,11 @@ const evaluateTestCases = async (submissionId, interviewId) => {
       passedCount,
       totalCount: results.rowCount
     });
+    io.to(`interview:${interviewId}`).emit('interview:activity', {
+      type: 'submission_completed',
+      status: finalStatus,
+      timestamp: new Date().toISOString()
+    });
   }
 };
 
@@ -94,15 +99,20 @@ exports.submitCode = async (req, res, next) => {
     }
 
     const interviewRes = await db.query(
-      `SELECT ip.role 
+      `SELECT ip.role, i.status 
        FROM interview_participants ip 
        JOIN interview_problems iprob ON ip.interview_id = iprob.interview_id
+       JOIN interviews i ON ip.interview_id = i.id
        WHERE ip.interview_id = $1 AND ip.user_id = $2 AND iprob.problem_id = $3`,
       [interviewId, userId, problemId]
     );
 
     if (interviewRes.rowCount === 0) {
       return res.status(403).json({ error: 'Not authorized for this interview or problem not assigned.' });
+    }
+
+    if (interviewRes.rows[0].status === 'COMPLETED' || interviewRes.rows[0].status === 'CANCELLED') {
+      return res.status(403).json({ error: 'Interview is no longer active.' });
     }
 
     const testCasesRes = await db.query('SELECT id, input FROM test_cases WHERE problem_id = $1', [problemId]);
@@ -118,6 +128,15 @@ exports.submitCode = async (req, res, next) => {
       [interviewId, userId, problemId, language, sourceCode]
     );
     const submissionId = insertSub.rows[0].id;
+
+    const io = getSocketIo();
+    if (io) {
+      io.to(`interview:${interviewId}`).emit('interview:activity', {
+        type: 'submission_started',
+        userId,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Send HTTP 202
     res.status(202).json({ message: 'Submission accepted', submissionId, status: 'Processing' });

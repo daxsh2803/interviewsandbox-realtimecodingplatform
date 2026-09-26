@@ -89,6 +89,14 @@ const initSocket = (httpServer) => {
               role,
               connected: true,
             });
+            // Candidate activity event
+            if (role === 'CANDIDATE') {
+              socket.to(roomName).emit('interview:activity', {
+                type: 'candidate_joined',
+                userId,
+                timestamp: new Date().toISOString()
+              });
+            }
           }
         } catch (redisErr) {
           console.error('Redis presence join error:', redisErr);
@@ -126,6 +134,14 @@ const initSocket = (httpServer) => {
               role,
               connected: false,
             });
+            // Candidate activity event
+            if (role === 'CANDIDATE') {
+              socket.to(roomName).emit('interview:activity', {
+                type: 'candidate_left',
+                userId,
+                timestamp: new Date().toISOString()
+              });
+            }
           }
         } catch (redisErr) {
           console.error('Redis presence leave error:', redisErr);
@@ -157,6 +173,14 @@ const initSocket = (httpServer) => {
               role,
               connected: false,
             });
+            // Candidate activity event
+            if (role === 'CANDIDATE') {
+              socket.to(roomName).emit('interview:activity', {
+                type: 'candidate_left',
+                userId,
+                timestamp: new Date().toISOString()
+              });
+            }
           }
         } catch (redisErr) {
           console.error('Redis presence disconnect error:', redisErr);

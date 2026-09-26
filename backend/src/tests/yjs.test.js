@@ -265,4 +265,65 @@ describe('Yjs Real-Time Collaboration', () => {
       });
     });
   });
+
+  it('should reject candidate updates when editor is locked', (done) => {
+    db.query.mockImplementation((queryStr) => {
+      if (queryStr.includes('role FROM interview_participants')) {
+        return Promise.resolve({ rows: [{ role: 'CANDIDATE' }] });
+      }
+      if (queryStr.includes('status FROM interviews')) {
+        return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const { redisClient } = require('../db/redis');
+    redisClient.set(`interview:${interviewId}:editor:lock`, 'locked').then(() => {
+      setupClient('user-1', (c1) => {
+        client1 = c1;
+        client1.emit('interview:join', { interviewId });
+
+        client1.on('interview:joined', () => {
+          const doc1 = new Y.Doc();
+          doc1.getText('sourceCode').insert(0, 'Code');
+          client1.emit('yjs:update', { interviewId, problemId, update: Array.from(Y.encodeStateAsUpdate(doc1)) });
+
+          client1.on('yjs:error', (payload) => {
+            expect(payload.message).toBe('Editor is currently locked by interviewer');
+            redisClient.del(`interview:${interviewId}:editor:lock`).then(() => done());
+          });
+        });
+      });
+    });
+  });
+
+  it('should reject candidate updates when interview is completed', (done) => {
+    db.query.mockImplementation((queryStr) => {
+      if (queryStr.includes('role FROM interview_participants')) {
+        return Promise.resolve({ rows: [{ role: 'CANDIDATE' }] });
+      }
+      if (queryStr.includes('status FROM interviews')) {
+        return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const { redisClient } = require('../db/redis');
+    redisClient.del(`interview:${interviewId}:editor:lock`).then(() => {
+      setupClient('user-1', (c1) => {
+        client1 = c1;
+        client1.emit('interview:join', { interviewId });
+
+        client1.on('interview:joined', () => {
+          const doc1 = new Y.Doc();
+          client1.emit('yjs:update', { interviewId, problemId, update: Array.from(Y.encodeStateAsUpdate(doc1)) });
+
+          client1.on('yjs:error', (payload) => {
+            expect(payload.message).toBe('Interview is no longer active');
+            done();
+          });
+        });
+      });
+    });
+  });
 });
