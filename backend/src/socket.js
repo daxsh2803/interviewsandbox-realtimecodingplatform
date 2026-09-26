@@ -3,6 +3,8 @@ const jwt = require('jsonwebtoken');
 const config = require('./config');
 const db = require('./db');
 const { registerYjsHandlers, cleanupSocketFromDocs } = require('./yjsManager');
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { redisClient, pubClient, subClient } = require('./db/redis');
 
 let io;
 
@@ -11,7 +13,8 @@ const initSocket = (httpServer) => {
     cors: {
       origin: process.env.VITE_FRONTEND_URL || 'http://localhost:5173',
       credentials: true,
-    }
+    },
+    adapter: createAdapter(pubClient, subClient)
   });
 
   // Authentication Middleware
@@ -73,12 +76,23 @@ const initSocket = (httpServer) => {
 
         socket.emit('interview:joined', { message: 'Successfully joined the interview room' });
 
-        // Broadcast presence
-        socket.to(roomName).emit('interview:presence', {
-          userId,
-          role,
-          connected: true,
-        });
+        // Redis presence tracking
+        try {
+          const countsKey = `interview:${interviewId}:presence:counts`;
+          const rolesKey = `interview:${interviewId}:presence:roles`;
+          const count = await redisClient.hIncrBy(countsKey, userId, 1);
+          if (count === 1) {
+            await redisClient.hSet(rolesKey, userId, role);
+            // Broadcast presence
+            socket.to(roomName).emit('interview:presence', {
+              userId,
+              role,
+              connected: true,
+            });
+          }
+        } catch (redisErr) {
+          console.error('Redis presence join error:', redisErr);
+        }
 
       } catch (err) {
         console.error('Socket interview:join error:', err);
@@ -90,33 +104,63 @@ const initSocket = (httpServer) => {
     registerYjsHandlers(socket);
 
     // Leave Interview Room
-    socket.on('interview:leave', () => {
+    socket.on('interview:leave', async () => {
       const { interviewId, userId, role } = socket.data;
       if (interviewId) {
         const roomName = `interview:${interviewId}`;
         socket.leave(roomName);
-        socket.to(roomName).emit('interview:presence', {
-          userId,
-          role,
-          connected: false,
-        });
         
+        // Sync clear to prevent double-decrement race condition with disconnect
         socket.data.interviewId = null;
         socket.data.role = null;
+        
+        try {
+          const countsKey = `interview:${interviewId}:presence:counts`;
+          const rolesKey = `interview:${interviewId}:presence:roles`;
+          const count = await redisClient.hIncrBy(countsKey, userId, -1);
+          if (count <= 0) {
+            await redisClient.hDel(countsKey, userId);
+            await redisClient.hDel(rolesKey, userId);
+            socket.to(roomName).emit('interview:presence', {
+              userId,
+              role,
+              connected: false,
+            });
+          }
+        } catch (redisErr) {
+          console.error('Redis presence leave error:', redisErr);
+        }
+        
         cleanupSocketFromDocs(socket.id);
       }
     });
 
     // Disconnect
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       const { interviewId, userId, role } = socket.data;
       if (interviewId) {
         const roomName = `interview:${interviewId}`;
-        socket.to(roomName).emit('interview:presence', {
-          userId,
-          role,
-          connected: false,
-        });
+        
+        // Sync clear to prevent double-decrement race condition
+        socket.data.interviewId = null;
+        socket.data.role = null;
+        
+        try {
+          const countsKey = `interview:${interviewId}:presence:counts`;
+          const rolesKey = `interview:${interviewId}:presence:roles`;
+          const count = await redisClient.hIncrBy(countsKey, userId, -1);
+          if (count <= 0) {
+            await redisClient.hDel(countsKey, userId);
+            await redisClient.hDel(rolesKey, userId);
+            socket.to(roomName).emit('interview:presence', {
+              userId,
+              role,
+              connected: false,
+            });
+          }
+        } catch (redisErr) {
+          console.error('Redis presence disconnect error:', redisErr);
+        }
       }
       cleanupSocketFromDocs(socket.id);
     });

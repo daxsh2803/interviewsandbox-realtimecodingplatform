@@ -17,8 +17,21 @@ The architecture follows a standard 3-tier model with specialized components for
 - **Ephemeral state:** Redis
 - **Infrastructure:** Docker, Docker Compose
 
-## Current Project Status: Phase 8 — Yjs Collaborative Editor
-The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs, a React frontend foundation, a Socket.io real-time transport layer, and a collaborative code editor powered by Yjs.
+## Current Project Status: Phase 9 — Redis / Distributed Real-Time State
+The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs, a React frontend foundation, a Socket.io real-time transport layer, and a collaborative code editor powered by Yjs. We have introduced Redis as the ephemeral distributed state layer and prepared Socket.io for multi-instance operation.
+
+### Architecture Boundaries
+- **PostgreSQL**: Persistent domain state (authoritative truth for domain models, auth, and problem metadata).
+- **Yjs**: Live collaborative document state (in-memory, synchronized across clients).
+- **Socket.io**: Real-time transport (WebSockets + polling fallback).
+- **Redis**: Ephemeral distributed coordination + Socket.io adapter (used for multi-instance pub/sub and distributed presence tracking).
+
+*Note: Redis does NOT persist Yjs source code or collaborative document contents. Yjs documents remain process-local.*
+
+### Phase 9 Known Limitations & Deployment Requirements
+- **Multi-Instance Yjs Limitation**: Because Yjs state remains process-local (in-memory Map) and is not persisted in Redis, instances do not automatically share Y.Doc state. 
+- **Sticky-Session Requirement**: Due to the above limitation, multi-instance deployments require load balancer session affinity (sticky sessions) keyed by `interviewId` to ensure all participants of a specific interview converge on the same backend process.
+- **Redis Presence Orphan Limitation**: In the event of an ungraceful backend crash, Socket.io disconnect handlers will not fire, potentially leaving orphaned presence increments in Redis. This limitation is accepted for Phase 9 as the state is ephemeral and resets organically.
 
 ### Authentication Endpoints
 - `POST /api/auth/register`: Register with `{ name, email, password }`
