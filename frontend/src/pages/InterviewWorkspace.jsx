@@ -154,7 +154,12 @@ export const InterviewWorkspace = () => {
             setLanguage={setLanguage}
             yDoc={yDoc}
           />
-          <ExecutionPanel />
+          <ExecutionPanel 
+            yDoc={yDoc}
+            language={language}
+            interviewId={interview.id}
+            problemId={activeProblemId}
+          />
         </div>
       </div>
     </div>
