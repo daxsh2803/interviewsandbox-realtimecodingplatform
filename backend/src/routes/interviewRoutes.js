@@ -21,8 +21,18 @@ router.delete('/:id/problems/:problemId', interviewerOnly, interviewController.r
 router.patch('/:id/status', interviewerOnly, interviewController.updateStatus);
 
 const executionController = require('../controllers/executionController');
+const submissionController = require('../controllers/submissionController');
+const testCaseController = require('../controllers/testCaseController');
 const { executionRateLimiter } = require('../middleware/rateLimiter');
 
 router.post('/:id/execute', requireParticipant, executionRateLimiter, executionController.executeCode);
+
+// Submission API
+router.post('/:id/problems/:problemId/submit', requireParticipant, executionRateLimiter, submissionController.submitCode);
+
+// Test case APIs
+router.get('/:id/problems/:problemId/test-cases', interviewerOnly, testCaseController.getTestCases);
+router.post('/:id/problems/:problemId/test-cases', interviewerOnly, testCaseController.createTestCase);
+router.delete('/:id/problems/:problemId/test-cases/:testCaseId', interviewerOnly, testCaseController.deleteTestCase);
 
 module.exports = router;

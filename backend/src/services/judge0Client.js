@@ -42,7 +42,7 @@ function mapJudge0Status(statusId) {
  * @param {Object} params - { sourceCode, language, stdin, executionId }
  * @returns {Promise<string>} judge0 submission token
  */
-async function submitCode({ sourceCode, language, stdin, executionId }) {
+async function submitCode({ sourceCode, language, stdin, executionId, callbackUrlOverride }) {
   const language_id = getLanguageId(language);
   const url = `${config.judge0.baseUrl}/submissions?base64_encoded=false&wait=false`;
 
@@ -53,10 +53,11 @@ async function submitCode({ sourceCode, language, stdin, executionId }) {
     cpu_time_limit: config.judge0.cpuTimeLimit,
     wall_time_limit: config.judge0.wallTimeLimit,
     memory_limit: config.judge0.memoryLimit,
-    // Add callback URL if configured, include secret via query string
-    callback_url: config.judge0.callbackUrl 
-      ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}`
-      : undefined
+    callback_url: callbackUrlOverride !== undefined 
+      ? callbackUrlOverride 
+      : (config.judge0.callbackUrl 
+        ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}`
+        : undefined)
   };
 
   const headers = {
