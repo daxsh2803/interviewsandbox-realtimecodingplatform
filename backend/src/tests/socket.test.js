@@ -64,7 +64,7 @@ describe('Socket.io Real-Time Transport', () => {
 
   it('should allow valid participant to join interview room', (done) => {
     const token = jwt.sign({ userId: 'user-1' }, config.jwtSecret);
-    db.query.mockResolvedValueOnce({ rows: [{ role: 'INTERVIEWER' }] });
+    db.query.mockResolvedValueOnce({ rows: [{ role: 'INTERVIEWER', status: 'IN_PROGRESS' }] });
 
     clientSocket = new Client(`http://localhost:${port}`, {
       extraHeaders: { Cookie: `auth_token=${token}` }
@@ -77,7 +77,7 @@ describe('Socket.io Real-Time Transport', () => {
     clientSocket.on('interview:joined', (payload) => {
       expect(payload.message).toBe('Successfully joined the interview room');
       expect(db.query).toHaveBeenCalledWith(
-        'SELECT role FROM interview_participants WHERE interview_id = $1 AND user_id = $2',
+        expect.stringContaining('JOIN interviews i'),
         ['int-1', 'user-1']
       );
       done();
@@ -98,6 +98,42 @@ describe('Socket.io Real-Time Transport', () => {
 
     clientSocket.on('interview:error', (payload) => {
       expect(payload.message).toBe('Unauthorized: Not a participant in this interview');
+      done();
+    });
+  });
+
+  it('should reject joining a completed interview', (done) => {
+    const token = jwt.sign({ userId: 'user-1' }, config.jwtSecret);
+    db.query.mockResolvedValueOnce({ rows: [{ role: 'CANDIDATE', status: 'COMPLETED' }] });
+
+    clientSocket = new Client(`http://localhost:${port}`, {
+      extraHeaders: { Cookie: `auth_token=${token}` }
+    });
+
+    clientSocket.on('connect', () => {
+      clientSocket.emit('interview:join', { interviewId: 'int-3' });
+    });
+
+    clientSocket.on('interview:error', (payload) => {
+      expect(payload.message).toBe('Interview is no longer active');
+      done();
+    });
+  });
+
+  it('should reject joining a cancelled interview', (done) => {
+    const token = jwt.sign({ userId: 'user-1' }, config.jwtSecret);
+    db.query.mockResolvedValueOnce({ rows: [{ role: 'CANDIDATE', status: 'CANCELLED' }] });
+
+    clientSocket = new Client(`http://localhost:${port}`, {
+      extraHeaders: { Cookie: `auth_token=${token}` }
+    });
+
+    clientSocket.on('connect', () => {
+      clientSocket.emit('interview:join', { interviewId: 'int-4' });
+    });
+
+    clientSocket.on('interview:error', (payload) => {
+      expect(payload.message).toBe('Interview is no longer active');
       done();
     });
   });

@@ -4,7 +4,7 @@ const redisClient = require('../db/redis').redisClient;
 // Limits each user to a certain number of execution requests per time window
 exports.executionRateLimiter = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const windowMs = 10000; // 10 seconds
     const maxRequests = 5; // 5 requests per 10 seconds
     

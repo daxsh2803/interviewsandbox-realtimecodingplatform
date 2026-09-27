@@ -12,7 +12,7 @@ const normalizeOutput = (str) => {
 const evaluateTestCases = async (submissionId, interviewId) => {
   // Check if all test cases have completed
   const results = await db.query(
-    `SELECT sr.status, sr.stdout, sr.stderr, tc.expected_output 
+    `SELECT sr.id, sr.status, sr.stdout, sr.stderr, tc.expected_output
      FROM submission_results sr
      JOIN test_cases tc ON sr.test_case_id = tc.id
      WHERE sr.submission_id = $1`,
@@ -44,9 +44,7 @@ const evaluateTestCases = async (submissionId, interviewId) => {
       const expected = normalizeOutput(r.expected_output);
       if (actual !== expected) {
         hasWA = true;
-        // In case judge0 returned accepted but it doesn't match our expected output, it's WA
-        // Update the submission_results row to WA
-        // (For simplicity we just derive the overall status here, but let's assume we want to update the DB)
+        await db.query(`UPDATE submission_results SET status = 'Wrong Answer' WHERE id = $1`, [r.id]);
       } else {
         passedCount++;
       }

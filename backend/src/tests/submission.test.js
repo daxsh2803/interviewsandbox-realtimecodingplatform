@@ -134,6 +134,42 @@ describe('Submission API', () => {
     expect(finalSubRes.rows[0].status).toBe('Accepted');
   });
 
+  it('should persist Wrong Answer if output mismatches expected', async () => {
+    judge0Client.mapJudge0Status.mockReturnValue('Accepted');
+
+    const subRes = await db.query(
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
+       VALUES ($1, $2, $3, 'javascript', 'code', 'Processing') RETURNING id`,
+      [interview.id, user.id, problem.id]
+    );
+    const subId = subRes.rows[0].id;
+
+    await db.query(
+      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token)
+       VALUES ($1, $2, 'Processing', 'mock-sub-token-mismatch')`,
+      [subId, testCase.id]
+    );
+
+    const res = await request(app)
+      .post('/api/executions/judge0/callback?type=submission')
+      .set('x-judge0-callback-secret', config.judge0.callbackSecret)
+      .send({
+        token: 'mock-sub-token-mismatch',
+        status: { id: 3 }, // 3 is accepted
+        stdout: 'wrong_out\n', // Mismatches 'out'
+        time: '0.045',
+        memory: 1234
+      });
+
+    expect(res.status).toBe(200);
+
+    const dbSubRes = await db.query('SELECT status FROM submission_results WHERE submission_id = $1', [subId]);
+expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
+
+    const finalSubRes = await db.query('SELECT status FROM submissions WHERE id = $1', [subId]);
+    expect(finalSubRes.rows[0].status).toBe('Wrong Answer');
+  });
+
   it('should reject callback with missing or incorrect secret', async () => {
     const res1 = await request(app)
       .post('/api/executions/judge0/callback?type=submission')

@@ -54,9 +54,12 @@ const initSocket = (httpServer) => {
           return socket.emit('interview:error', { message: 'interviewId is required' });
         }
 
-        // Verify participation
+        // Verify participation and interview status
         const participantResult = await db.query(
-          'SELECT role FROM interview_participants WHERE interview_id = $1 AND user_id = $2',
+          `SELECT ip.role, i.status
+           FROM interview_participants ip
+           JOIN interviews i ON ip.interview_id = i.id
+           WHERE ip.interview_id = $1 AND ip.user_id = $2`,
           [interviewId, userId]
         );
 
@@ -64,7 +67,12 @@ const initSocket = (httpServer) => {
           return socket.emit('interview:error', { message: 'Unauthorized: Not a participant in this interview' });
         }
 
-        const role = participantResult.rows[0].role;
+        const { role, status } = participantResult.rows[0];
+
+        if (status === 'COMPLETED' || status === 'CANCELLED') {
+          return socket.emit('interview:error', { message: 'Interview is no longer active' });
+        }
+
         const roomName = `interview:${interviewId}`;
 
         // Store metadata

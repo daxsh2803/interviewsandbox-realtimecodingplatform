@@ -55,7 +55,7 @@ describe('Yjs Real-Time Collaboration', () => {
   };
 
   it('should synchronize Yjs state between two connected participants', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE' }] });
+    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
 
     setupClient('user-1', (c1) => {
       client1 = c1;
@@ -112,7 +112,7 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should correctly handle late joiner synchronization', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE' }] });
+    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
 
     setupClient('user-1', (c1) => {
       client1 = c1;
@@ -156,7 +156,7 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should create document lazily, keep it while active, and destroy it when all sockets leave', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE' }] });
+    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
     
     expect(docs.has(`${interviewId}:${problemId}`)).toBe(false);
 
@@ -207,7 +207,7 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should isolate problems within the same interview', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE' }] });
+    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
     const prob1 = 'prob-1';
     const prob2 = 'prob-2';
 
@@ -240,7 +240,7 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should enforce cross-interview isolation and reject updates to other interviews', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE' }] });
+    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
 
     setupClient('user-1', (c1) => {
       client1 = c1;
@@ -269,8 +269,8 @@ describe('Yjs Real-Time Collaboration', () => {
 
   it('should reject candidate updates when editor is locked', (done) => {
     db.query.mockImplementation((queryStr) => {
-      if (queryStr.includes('role FROM interview_participants')) {
-        return Promise.resolve({ rows: [{ role: 'CANDIDATE' }] });
+      if (queryStr.includes('JOIN interviews i') || queryStr.includes('role FROM interview_participants')) {
+        return Promise.resolve({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
       }
       if (queryStr.includes('status FROM interviews')) {
         return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
@@ -300,8 +300,8 @@ describe('Yjs Real-Time Collaboration', () => {
 
   it('should reject candidate updates when interview is completed', (done) => {
     db.query.mockImplementation((queryStr) => {
-      if (queryStr.includes('role FROM interview_participants')) {
-        return Promise.resolve({ rows: [{ role: 'CANDIDATE' }] });
+      if (queryStr.includes('JOIN interviews i') || queryStr.includes('role FROM interview_participants')) {
+        return Promise.resolve({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
       }
       if (queryStr.includes('status FROM interviews')) {
         return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });

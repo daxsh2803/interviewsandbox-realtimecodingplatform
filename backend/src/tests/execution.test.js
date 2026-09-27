@@ -175,4 +175,48 @@ describe('Execution API', () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('Unauthorized callback');
   });
+
+  it('should isolate rate limits per user', async () => {
+    // Create a second user
+    const user2Res = await db.query(
+      "INSERT INTO users (email, password_hash, name) VALUES ('exec2@test.com', 'hash', 'Exec 2') RETURNING id, email"
+    );
+    const user2 = user2Res.rows[0];
+    const token2 = jwt.sign({ userId: user2.id, email: user2.email }, config.jwtSecret, { expiresIn: '1h' });
+
+    // Link user2 to interview
+    await db.query(
+      "INSERT INTO interview_participants (interview_id, user_id, role) VALUES ($1, $2, 'CANDIDATE')",
+      [interview.id, user2.id]
+    );
+
+    judge0Client.submitCode.mockResolvedValue('mock-token-rl');
+
+    const { redisClient } = require('../db/redis');
+    await redisClient.del(`ratelimit:execute:${user.id}`);
+    await redisClient.del(`ratelimit:execute:${user2.id}`);
+
+    // Exhaust user1 limit (5 requests max)
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app)
+        .post(`/api/interviews/${interview.id}/execute`)
+        .set('Cookie', `auth_token=${token}`)
+        .send({ problemId: problem.id, language: 'javascript', sourceCode: 'console.log("hello");' });
+      expect(res.status).toBe(202);
+    }
+
+    // 6th request for user1 should fail
+    const blockedRes = await request(app)
+      .post(`/api/interviews/${interview.id}/execute`)
+      .set('Cookie', `auth_token=${token}`)
+      .send({ problemId: problem.id, language: 'javascript', sourceCode: 'console.log("hello");' });
+    expect(blockedRes.status).toBe(429);
+
+    // user2 should still be able to execute
+    const user2ResSuccess = await request(app)
+      .post(`/api/interviews/${interview.id}/execute`)
+      .set('Cookie', `auth_token=${token2}`)
+      .send({ problemId: problem.id, language: 'javascript', sourceCode: 'console.log("hello");' });
+    expect(user2ResSuccess.status).toBe(202);
+  });
 });

@@ -135,6 +135,17 @@ describe('Report and History API', () => {
       expect(res.status).toBe(403);
     });
 
+    it('should reject candidate from modifying notes', async () => {
+      db.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ role: 'CANDIDATE' }] }); // Participant check
+
+      const res = await request(app)
+        .put(`/api/interviews/${interviewId}/notes`)
+        .set('Cookie', [`auth_token=${candidateToken}`])
+        .send({ notes: 'Hack' });
+
+      expect(res.status).toBe(403);
+    });
+
     it('should allow interviewer to upsert notes', async () => {
       db.query
         .mockResolvedValueOnce({ rowCount: 1, rows: [{ role: 'INTERVIEWER' }] }) // Participant check
