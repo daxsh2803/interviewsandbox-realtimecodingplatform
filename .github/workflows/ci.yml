@@ -29,5 +29,31 @@ jobs:
       - name: Validate backend source
         run: node --check backend/server.js
 
+      - name: Start Docker services
+        run: docker compose up -d postgres redis
+
+      - name: Wait for PostgreSQL
+        run: |
+          while ! docker exec interview_postgres pg_isready -U postgres -d interview_db; do
+            sleep 1
+          done
+
+      - name: Run database migrations
+        run: npm run migrate --prefix backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5433/interview_db
+
+      - name: Run backend tests
+        run: npm test --prefix backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5433/interview_db
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: supersecret_test
+          JUDGE0_CALLBACK_SECRET: secret_token_for_webhooks
+
       - name: Build frontend
         run: npm run build -w frontend
+
+      - name: Stop Docker services
+        if: always()
+        run: docker compose down
