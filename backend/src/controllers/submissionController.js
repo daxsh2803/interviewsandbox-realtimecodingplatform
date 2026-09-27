@@ -80,6 +80,7 @@ const evaluateTestCases = async (submissionId, interviewId) => {
       status: finalStatus,
       timestamp: new Date().toISOString()
     });
+    io.to(`interview:${interviewId}`).emit('interview:report-updated', { type: 'submission_completed', submissionId });
   }
 };
 

@@ -21,12 +21,13 @@ describe('Yjs Multi-Instance Split-Brain Limitation', () => {
       jest.isolateModules(() => {
         const { initSocket } = require('../socket');
         const { docs, docSockets } = require('../yjsManager');
+        const { closeRedis } = require('../db/redis');
         const httpServer = createServer();
         const io = initSocket(httpServer);
         httpServer.listen(port);
-        instance1 = instance1 || { httpServer, io, docs, docSockets, port };
+        instance1 = instance1 || { httpServer, io, docs, docSockets, port, closeRedis };
         if (instance1.port !== port) {
-          instance2 = { httpServer, io, docs, docSockets, port };
+          instance2 = { httpServer, io, docs, docSockets, port, closeRedis };
         }
       });
     };
@@ -36,10 +37,11 @@ describe('Yjs Multi-Instance Split-Brain Limitation', () => {
   });
 
   afterAll(async () => {
-    if (instance1) { instance1.io.close(); instance1.httpServer.close(); }
-    if (instance2) { instance2.io.close(); instance2.httpServer.close(); }
+    if (instance1) { instance1.io.close(); instance1.httpServer.close(); await instance1.closeRedis(); }
+    if (instance2) { instance2.io.close(); instance2.httpServer.close(); await instance2.closeRedis(); }
     await redisClient.del(`interview:${interviewId}:presence:counts`);
     await redisClient.del(`interview:${interviewId}:presence:roles`);
+    await require('../db/redis').closeRedis();
   });
 
   beforeEach(async () => {

@@ -5,6 +5,7 @@ import { Login } from '../pages/Login';
 import { Register } from '../pages/Register';
 import { Dashboard } from '../pages/Dashboard';
 import { InterviewWorkspace } from '../pages/InterviewWorkspace';
+import { InterviewReport } from '../pages/InterviewReport';
 import { useAuth } from '../context/AuthContext';
 
 export const AppRoutes = () => {
@@ -15,34 +16,42 @@ export const AppRoutes = () => {
       {/* Public Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      
+
       {/* Protected Routes inside MainLayout */}
       <Route element={<MainLayout />}>
-        <Route 
-          path="/dashboard" 
+        <Route
+          path="/dashboard"
           element={
             <ProtectedRoute>
               <Dashboard />
             </ProtectedRoute>
-          } 
+          }
         />
         {/* Redirect root to dashboard if logged in, else login */}
-        <Route 
-          path="/" 
+        <Route
+          path="/"
           element={
             loading ? null : user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />
-          } 
+          }
         />
       </Route>
 
       {/* Standalone protected route for workspace (no MainLayout wrapper) */}
-      <Route 
-        path="/interviews/:id" 
+      <Route
+        path="/interviews/:id"
         element={
           <ProtectedRoute>
             <InterviewWorkspace />
           </ProtectedRoute>
-        } 
+        }
+      />
+      <Route
+        path="/interviews/:id/report"
+        element={
+          <ProtectedRoute>
+            <InterviewReport />
+          </ProtectedRoute>
+        }
       />
 
       {/* Catch all */}

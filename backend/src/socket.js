@@ -200,4 +200,8 @@ const getIo = () => {
   return io;
 };
 
-module.exports = { initSocket, getIo };
+const getSocketIo = () => {
+  return io || null;
+};
+
+module.exports = { initSocket, getIo, getSocketIo };

@@ -259,6 +259,7 @@ exports.updateStatus = async (req, res, next) => {
           interviewId: id,
           status: 'COMPLETED'
         });
+        io.to(`interview:${id}`).emit('interview:report-updated', { type: 'interview_completed' });
       }
     }
 

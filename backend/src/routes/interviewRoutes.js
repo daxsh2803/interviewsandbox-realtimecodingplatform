@@ -41,4 +41,16 @@ router.get('/:id/problems/:problemId/test-cases', interviewerOnly, testCaseContr
 router.post('/:id/problems/:problemId/test-cases', interviewerOnly, testCaseController.createTestCase);
 router.delete('/:id/problems/:problemId/test-cases/:testCaseId', interviewerOnly, testCaseController.deleteTestCase);
 
+const reportController = require('../controllers/reportController');
+
+// Report & History APIs
+router.get('/:id/report', requireParticipant, reportController.getInterviewReport);
+router.get('/:id/history', requireParticipant, reportController.getInterviewReport); // Alias for now
+router.get('/:id/submissions', requireParticipant, reportController.getSubmissions);
+router.get('/:id/snapshots', requireParticipant, reportController.getSnapshots);
+
+// Interviewer Notes APIs
+router.get('/:id/notes', interviewerOnly, reportController.getNotes);
+router.put('/:id/notes', interviewerOnly, reportController.upsertNotes);
+
 module.exports = router;

@@ -73,3 +73,6 @@ describe('Auth Endpoints', () => {
     });
   });
 });
+
+
+afterAll(async () => { await require('../db/redis').closeRedis(); });

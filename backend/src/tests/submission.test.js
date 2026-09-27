@@ -59,6 +59,7 @@ describe('Submission API', () => {
 
   afterAll(async () => {
     await db.pool.end();
+    await require('../db/redis').closeRedis();
   });
 
   afterEach(() => {
@@ -84,9 +85,15 @@ describe('Submission API', () => {
     const dbRes = await db.query('SELECT status FROM submissions WHERE id = $1', [res.body.submissionId]);
     expect(dbRes.rows[0].status).toBe('Processing');
     
-    // Wait slightly for background tasks
-    await new Promise(r => setTimeout(r, 100));
-    const tcRes = await db.query('SELECT judge0_token FROM submission_results WHERE submission_id = $1', [res.body.submissionId]);
+    // Wait for the background task to complete
+    let attempts = 0;
+    let tcRes;
+    while(attempts < 50) {
+      tcRes = await db.query('SELECT judge0_token FROM submission_results WHERE submission_id = $1', [res.body.submissionId]);
+      if (tcRes.rowCount > 0 && tcRes.rows.every(r => r.judge0_token === 'mock-sub-token-123')) break;
+      await new Promise(r => setTimeout(r, 50));
+      attempts++;
+    }
     expect(tcRes.rows[0].judge0_token).toBe('mock-sub-token-123');
   });
 

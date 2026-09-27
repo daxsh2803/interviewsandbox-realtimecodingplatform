@@ -25,6 +25,7 @@ describe('Distributed Redis Presence', () => {
   });
 
   afterAll(async () => {
+    await require('../db/redis').closeRedis();
     io.close();
     httpServer.close();
   });
@@ -78,6 +79,7 @@ describe('Distributed Redis Presence', () => {
               } else {
                 expect(payload.connected).toBe(false);
                 // The test finishes when the user disconnects their last tab
+                observer.disconnect();
                 done();
               }
             }

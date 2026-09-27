@@ -102,3 +102,6 @@ describe('Socket.io Real-Time Transport', () => {
     });
   });
 });
+
+
+afterAll(async () => { await require('../db/redis').closeRedis(); });

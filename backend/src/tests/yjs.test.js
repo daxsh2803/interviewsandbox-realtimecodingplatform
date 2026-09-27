@@ -28,7 +28,8 @@ describe('Yjs Real-Time Collaboration', () => {
     });
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await require('../db/redis').closeRedis();
     io.close();
     httpServer.close();
   });

@@ -56,6 +56,7 @@ describe('Execution API', () => {
 
   afterAll(async () => {
     await db.pool.end();
+    await require('../db/redis').closeRedis();
   });
 
   afterEach(() => {
@@ -82,9 +83,15 @@ describe('Execution API', () => {
     const dbRes = await db.query('SELECT status, judge0_token FROM code_executions WHERE id = $1', [res.body.executionId]);
     expect(dbRes.rows[0].status).toBe('Processing');
     
-    // Wait slightly to let the async background token update happen
-    await new Promise(r => setTimeout(r, 100));
-    const dbRes2 = await db.query('SELECT judge0_token FROM code_executions WHERE id = $1', [res.body.executionId]);
+    // Wait for the async background token update to happen
+    let attempts = 0;
+    let dbRes2;
+    while(attempts < 50) {
+      dbRes2 = await db.query('SELECT judge0_token FROM code_executions WHERE id = $1', [res.body.executionId]);
+      if (dbRes2.rows[0].judge0_token === 'mock-token-123') break;
+      await new Promise(r => setTimeout(r, 50));
+      attempts++;
+    }
     expect(dbRes2.rows[0].judge0_token).toBe('mock-token-123');
   });
 

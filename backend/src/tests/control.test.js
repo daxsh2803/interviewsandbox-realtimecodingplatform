@@ -20,7 +20,8 @@ jest.mock('../db/redis', () => ({
     get: jest.fn(),
     set: jest.fn(),
     del: jest.fn()
-  }
+  },
+  closeRedis: jest.fn()
 }));
 
 jest.mock('../socket', () => ({
@@ -156,3 +157,6 @@ describe('Interviewer Control Room Endpoints', () => {
     });
   });
 });
+
+
+afterAll(async () => { await require('../db/redis').closeRedis(); });

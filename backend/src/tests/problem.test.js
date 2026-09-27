@@ -97,3 +97,6 @@ describe('Problem Endpoints', () => {
     });
   });
 });
+
+
+afterAll(async () => { await require('../db/redis').closeRedis(); });

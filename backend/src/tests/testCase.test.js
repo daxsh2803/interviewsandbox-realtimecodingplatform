@@ -53,6 +53,7 @@ describe('Test Case API', () => {
 
   afterAll(async () => {
     await db.pool.end();
+    await require('../db/redis').closeRedis();
   });
 
   it('should allow interviewer to create test case', async () => {
