@@ -4,7 +4,7 @@ test.describe('Interview Authorization', () => {
   let apiUrl;
 
   test.beforeAll(() => {
-    apiUrl = process.env.BASE_URL ? `${process.env.BASE_URL}/api` : 'http://localhost:5000/api';
+    apiUrl = process.env.BASE_URL ? `${process.env.BASE_URL}/api` : 'http://127.0.0.1:5000/api';
   });
 
   test('enforces role-based access to interviews and controls', async ({ browser }) => {

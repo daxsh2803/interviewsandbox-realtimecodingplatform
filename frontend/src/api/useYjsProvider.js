@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import * as Y from 'yjs';
 import { getSocket } from './socketClient';
 
-export const useYjsProvider = (interviewId, problemId, socketStatus) => {
+export const useYjsProvider = (interviewId, problemId, socketStatus, isInterviewJoined) => {
   const [doc, setDoc] = useState(null);
   
   useEffect(() => {
-    if (!interviewId || !problemId || socketStatus !== 'Connected') {
+    if (!interviewId || !problemId || socketStatus !== 'Connected' || !isInterviewJoined) {
       return;
     }
 
@@ -61,8 +61,9 @@ export const useYjsProvider = (interviewId, problemId, socketStatus) => {
       socket.off('yjs:error', onYjsError);
       ydoc.off('update', handleLocalUpdate);
       ydoc.destroy();
+      setDoc(null);
     };
-  }, [interviewId, problemId, socketStatus]);
+  }, [interviewId, problemId, socketStatus, isInterviewJoined]);
 
   return doc;
 };

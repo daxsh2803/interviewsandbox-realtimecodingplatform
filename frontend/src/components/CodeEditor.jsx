@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { MonacoBinding } from 'y-monaco';
 
@@ -11,40 +11,38 @@ const LANGUAGES = [
 ];
 
 export const CodeEditor = ({ language, setLanguage, yDoc, readOnly = false }) => {
-  const editorRef = useRef(null);
+  const [editor, setEditor] = useState(null);
   const bindingRef = useRef(null);
-
+  const [isBound, setIsBound] = useState(false);
+  
   const handleLanguageChange = (e) => {
     setLanguage(e.target.value);
   };
 
-  const handleEditorMount = (editor, monaco) => {
-    editorRef.current = editor;
-    if (yDoc) {
-      const type = yDoc.getText('sourceCode');
-      bindingRef.current = new MonacoBinding(type, editor.getModel(), new Set([editor]), null);
-    }
+  const handleEditorMount = (editorInstance) => {
+    setEditor(editorInstance);
   };
 
   useEffect(() => {
-    if (editorRef.current && yDoc) {
-      // If yDoc changes, rebind
-      if (bindingRef.current) {
-        bindingRef.current.destroy();
-      }
-      const type = yDoc.getText('sourceCode');
-      bindingRef.current = new MonacoBinding(type, editorRef.current.getModel(), new Set([editorRef.current]), null);
+    if (!editor || !yDoc) {
+      setIsBound(false);
+      return;
     }
+
+    const type = yDoc.getText('sourceCode');
+    const binding = new MonacoBinding(type, editor.getModel(), new Set([editor]), null);
+    bindingRef.current = binding;
+    setIsBound(true);
+
     return () => {
-      if (bindingRef.current) {
-        bindingRef.current.destroy();
-        bindingRef.current = null;
-      }
+      binding.destroy();
+      bindingRef.current = null;
+      setIsBound(false);
     };
-  }, [yDoc]);
+  }, [editor, yDoc]);
 
   return (
-    <div className="code-editor-container">
+    <div className="code-editor-container" data-collaborative={isBound ? "ready" : "connecting"}>
       <div className="editor-toolbar">
         <select 
           className="form-input" 

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { interviewApi } from '../api/interviewApi';
+import { apiClient } from '../api/client';
+import { getSocket } from '../api/socketClient';
 import { WorkspaceHeader } from '../components/WorkspaceHeader';
 import { ProblemPanel } from '../components/ProblemPanel';
 import { CodeEditor } from '../components/CodeEditor';
@@ -20,6 +22,7 @@ export const InterviewWorkspace = () => {
   
   // Socket and Presence state
   const [socketStatus, setSocketStatus] = useState('Disconnected');
+  const [isInterviewJoined, setIsInterviewJoined] = useState(false);
   const [participants, setParticipants] = useState([]);
 
   const [activeProblemId, setActiveProblemId] = useState(null);
@@ -28,131 +31,139 @@ export const InterviewWorkspace = () => {
   const [language, setLanguage] = useState('javascript');
 
   useEffect(() => {
-    let activeSocket = null;
+    let isMounted = true;
+    const activeSocket = getSocket();
+
+    const handleConnect = () => {
+      if (!isMounted) return;
+      setSocketStatus('Connected');
+      setIsInterviewJoined(false);
+      activeSocket.emit('interview:join', { interviewId: id });
+    };
+
+    const handleDisconnect = () => {
+      if (!isMounted) return;
+      setSocketStatus('Disconnected');
+      setIsInterviewJoined(false);
+    };
+
+    const handleInterviewJoined = (payload) => {
+      if (!isMounted) return;
+      console.log(payload?.message);
+      setIsInterviewJoined(true);
+    };
+
+    const handlePresence = (payload) => {
+      if (!isMounted) return;
+      setParticipants(prev => {
+        if (payload.connected) {
+          const existing = prev.find(p => p.userId === payload.userId);
+          if (existing) return prev;
+          return [...prev, payload];
+        } else {
+          return prev.filter(p => p.userId !== payload.userId);
+        }
+      });
+    };
+
+    const handleEditorLock = () => isMounted && setEditorLocked(true);
+    const handleEditorUnlock = () => isMounted && setEditorLocked(false);
+    const handleProblemPushed = (payload) => isMounted && setActiveProblemId(payload.problemId);
+    const handleInterviewEnded = () => {
+      if (!isMounted) return;
+      setInterview(prev => ({ ...prev, status: 'COMPLETED' }));
+      setEditorLocked(true);
+    };
+    const handleActivity = (payload) => {
+      if (!isMounted) return;
+      setActivities(prev => [payload, ...prev].slice(0, 50));
+    };
+    const handleError = (payload) => {
+      if (!isMounted) return;
+      setError(payload?.message);
+      setIsInterviewJoined(false);
+      activeSocket.disconnect();
+    };
+
+    activeSocket.on('connect', handleConnect);
+    activeSocket.on('disconnect', handleDisconnect);
+    activeSocket.on('interview:joined', handleInterviewJoined);
+    activeSocket.on('interview:presence', handlePresence);
+    activeSocket.on('interview:editor-lock', handleEditorLock);
+    activeSocket.on('interview:editor-unlock', handleEditorUnlock);
+    activeSocket.on('problem:pushed', handleProblemPushed);
+    activeSocket.on('interview:ended', handleInterviewEnded);
+    activeSocket.on('interview:activity', handleActivity);
+    activeSocket.on('interview:error', handleError);
 
     const fetchInterviewAndConnect = async () => {
       try {
-        const data = await interviewApi.getInterviewById(id);
+        const [data, meData] = await Promise.all([
+          interviewApi.getInterviewById(id),
+          apiClient('/auth/me')
+        ]);
+        if (!isMounted) return;
         const fetchedInterview = data.interview;
         setInterview(fetchedInterview);
         
-        // Find current user's role from auth context (simplified: we check if they are interviewer)
-        const currentUser = fetchedInterview.participants.find(p => p.role === 'INTERVIEWER') 
-          || fetchedInterview.participants[0]; 
-        // In a real app with auth context, we match by user ID. 
-        // For this phase, we'll try to get it correctly from the backend by assuming backend verifies token.
-        // Actually, let's fetch current user info or assume 'Participant' is default unless we fetch role.
-        // Wait, `authApi.me()` could get user. Let's assume the user is INTERVIEWER if they created it, but we need real check.
-        // I will use a simple check: if we can fetch lock, we are maybe interviewer?
-        // Let's just rely on the API. The API returns `participants` with `id`. We don't have current userId.
-        // I'll add an auth API call to get user role, but for now I'll just check if we can call lock endpoint.
+        const participant = fetchedInterview.participants?.find(p => p.id === meData?.user?.id);
+        if (participant) {
+          setUserRole(participant.role);
+        }
         
         try {
           const lockData = await interviewApi.getLock(id);
-          setEditorLocked(lockData.locked);
+          if (isMounted) setEditorLocked(lockData.locked);
         } catch (e) {}
 
         try {
           const activeProbData = await interviewApi.getActiveProblem(id);
+          if (!isMounted) return;
           if (activeProbData.problemId) {
             setActiveProblemId(activeProbData.problemId);
           } else if (fetchedInterview.problems && fetchedInterview.problems.length > 0) {
             setActiveProblemId(fetchedInterview.problems[0].id);
           }
         } catch (e) {
-          if (fetchedInterview.problems && fetchedInterview.problems.length > 0) {
+          if (isMounted && fetchedInterview.problems && fetchedInterview.problems.length > 0) {
             setActiveProblemId(fetchedInterview.problems[0].id);
           }
         }
 
-        // Connect Socket.io
-        import('../api/socketClient').then(({ getSocket }) => {
-          activeSocket = getSocket();
-          
-          activeSocket.on('connect', () => {
-            setSocketStatus('Connected');
-            activeSocket.emit('interview:join', { interviewId: id });
-          });
-
-          activeSocket.on('disconnect', () => {
-            setSocketStatus('Disconnected');
-          });
-
-          activeSocket.on('interview:joined', (payload) => {
-            console.log(payload.message);
-          });
-
-          activeSocket.on('interview:presence', (payload) => {
-            setParticipants(prev => {
-              if (payload.connected) {
-                const existing = prev.find(p => p.userId === payload.userId);
-                if (existing) return prev;
-                return [...prev, payload];
-              } else {
-                return prev.filter(p => p.userId !== payload.userId);
-              }
-            });
-          });
-
-          activeSocket.on('interview:editor-lock', (payload) => setEditorLocked(true));
-          activeSocket.on('interview:editor-unlock', (payload) => setEditorLocked(false));
-          
-          activeSocket.on('problem:pushed', (payload) => setActiveProblemId(payload.problemId));
-          
-          activeSocket.on('interview:ended', (payload) => {
-            setInterview(prev => ({ ...prev, status: 'COMPLETED' }));
-            setEditorLocked(true); // Ensure editor locks locally
-          });
-
-          activeSocket.on('interview:activity', (payload) => {
-            setActivities(prev => [payload, ...prev].slice(0, 50));
-          });
-
-          activeSocket.on('interview:error', (payload) => {
-            setError(payload.message);
-            activeSocket.disconnect();
-          });
-
+        if (activeSocket.connected) {
+          handleConnect();
+        } else {
           activeSocket.connect();
-        });
+        }
 
       } catch (err) {
-        setError(err.message || 'Failed to load interview');
+        if (isMounted) setError(err.message || 'Failed to load interview');
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
     
     fetchInterviewAndConnect();
-    // Also fetch current user to know if they are interviewer. We'll fetch from /api/auth/me
-    import('../api/client').then(({ apiClient }) => {
-      apiClient('/auth/me').then(res => {
-        apiClient(`/interviews/${id}`).then(intData => {
-          const participant = intData.interview.participants.find(p => p.id === res.user.id);
-          if (participant) setUserRole(participant.role);
-        });
-      }).catch(e => console.error(e));
-    });
 
     return () => {
-      if (activeSocket) {
-        activeSocket.emit('interview:leave');
-        activeSocket.off('connect');
-        activeSocket.off('disconnect');
-        activeSocket.off('interview:joined');
-        activeSocket.off('interview:presence');
-        activeSocket.off('interview:editor-lock');
-        activeSocket.off('interview:editor-unlock');
-        activeSocket.off('problem:pushed');
-        activeSocket.off('interview:ended');
-        activeSocket.off('interview:activity');
-        activeSocket.off('interview:error');
-        activeSocket.disconnect();
-      }
+      isMounted = false;
+      activeSocket.emit('interview:leave');
+      activeSocket.off('connect', handleConnect);
+      activeSocket.off('disconnect', handleDisconnect);
+      activeSocket.off('interview:joined', handleInterviewJoined);
+      activeSocket.off('interview:presence', handlePresence);
+      activeSocket.off('interview:editor-lock', handleEditorLock);
+      activeSocket.off('interview:editor-unlock', handleEditorUnlock);
+      activeSocket.off('problem:pushed', handleProblemPushed);
+      activeSocket.off('interview:ended', handleInterviewEnded);
+      activeSocket.off('interview:activity', handleActivity);
+      activeSocket.off('interview:error', handleError);
+      activeSocket.disconnect();
+      setIsInterviewJoined(false);
     };
   }, [id]);
 
-  const yDoc = useYjsProvider(id, activeProblemId, socketStatus);
+  const yDoc = useYjsProvider(id, activeProblemId, socketStatus, isInterviewJoined);
 
   const handleProblemChange = async (probId) => {
     if (userRole === 'INTERVIEWER') {
@@ -207,7 +218,7 @@ export const InterviewWorkspace = () => {
   const isCompleted = interview?.status === 'COMPLETED' || interview?.status === 'CANCELLED';
 
   return (
-    <div className="workspace-layout">
+    <div className="workspace-layout" data-joined={isInterviewJoined}>
       <WorkspaceHeader 
         interview={interview} 
         userRole={userRole} 
@@ -259,7 +270,7 @@ export const InterviewWorkspace = () => {
             language={language}
             setLanguage={setLanguage}
             yDoc={yDoc}
-            readOnly={editorLocked || isCompleted}
+            readOnly={(userRole !== 'INTERVIEWER' && editorLocked) || isCompleted}
           />
           <ExecutionPanel 
             yDoc={yDoc}
