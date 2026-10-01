@@ -1,5 +1,5 @@
 const db = require('../db');
-const redisClient = require('../db/redis');
+const { redisClient } = require('../db/redis');
 
 const checkHealth = async (req, res, next) => {
   let dbStatus = 'disconnected';

@@ -96,24 +96,51 @@ The `.env` file requires the following authentication variable:
 - Node.js (v18+)
 - Docker and Docker Compose
 
-## How to start PostgreSQL and Redis
-1. Make sure Docker is running.
-2. From the project root, run:
+## How to Run the Full Stack Locally (Docker)
+We use Docker Compose to run the entire application stack locally (Frontend, Backend, PostgreSQL, Redis).
+
+### Prerequisites
+- Docker and Docker Compose
+- Node.js (only for local development outside Docker)
+
+### Startup Instructions
+1. Copy the environment template to create your local `.env` file:
    ```bash
-   docker-compose up -d
+   cp .env.example .env
+   ```
+   *(Note: Populate `JWT_SECRET` and other placeholders as needed for testing).*
+
+2. Build and start the stack:
+   ```bash
+   docker compose up --build -d
    ```
 
-## How to start backend
-1. Open a terminal in the `backend` directory.
-2. Copy `.env.example` to `.env` in the root or `backend` folder.
-3. Run `npm install`
-4. Run `npm run dev`
+3. Access the application:
+   - **Frontend**: [http://localhost:8080](http://localhost:8080)
+   - **Backend API**: [http://localhost:5000/api](http://localhost:5000/api)
 
-## How to start frontend
-1. Open a terminal in the `frontend` directory.
-2. Copy `.env.example` to `.env`.
-3. Run `npm install`
-4. Run `npm run dev`
+4. To view logs for a specific service (e.g., backend):
+   ```bash
+   docker compose logs -f backend
+   ```
+
+5. To stop the stack:
+   ```bash
+   docker compose down
+   ```
+
+### Data Persistence and Reset
+- The database and Redis data are preserved in Docker volumes (`postgres_data`, `redis_data`).
+- To completely reset the database and ephemeral state, run:
+  ```bash
+  docker compose down -v
+  ```
+
+### Limitations & Caveats
+- **Local Container Testing vs Public Deployment**: This `docker-compose.yml` binds PostgreSQL and Redis to your local machine's ports (`5433` and `6379`) for easy debugging. In a true production environment, these ports should **not** be exposed to the public internet.
+- **Frontend Build Configuration**: The frontend (`interview_frontend`) uses a multi-stage Docker build and is served statically by Nginx. The Nginx reverse proxy routes `/api` and `/socket.io` directly to the backend container. Because Vite variables are embedded at build time, `VITE_API_URL=/api` is passed as a build argument in the Dockerfile.
+- **Yjs State**: Collaborative coding sessions (Yjs documents) are stored in-memory on the backend. Restarting the backend container will clear active coding sessions.
+- **Judge0 Webhooks**: If you are using a public Judge0 instance (e.g., the public API), it will not be able to reach your `localhost` backend to deliver execution webhooks. To test Judge0 execution locally, either self-host Judge0 on the same Docker network or use a tunneling service (like ngrok) and update `JUDGE0_CALLBACK_URL` in `.env`.
 
 ## Continuous Integration (CI)
 GitHub Actions is configured to run automated CI checks:
