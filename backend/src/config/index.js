@@ -15,4 +15,26 @@ module.exports = {
     wallTimeLimit: parseFloat(process.env.JUDGE0_WALL_TIME_LIMIT) || 5.0,
     memoryLimit: parseInt(process.env.JUDGE0_MEMORY_LIMIT, 10) || 128000,
   },
+  authRateLimit: {
+    windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
+    max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 10,
+  },
+  executionRateLimit: {
+    windowMs: parseInt(process.env.EXEC_RATE_LIMIT_WINDOW_MS, 10) || 10000,
+    max: parseInt(process.env.EXEC_RATE_LIMIT_MAX, 10) || 5,
+  }
 };
+
+if (module.exports.nodeEnv === 'production') {
+  const missing = [];
+  if (!process.env.DATABASE_URL) missing.push('DATABASE_URL');
+  if (!process.env.REDIS_URL) missing.push('REDIS_URL');
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback_secret_do_not_use_in_prod') {
+    missing.push('JWT_SECRET (must be securely set)');
+  }
+
+  if (missing.length > 0) {
+    console.error('CRITICAL: Missing required production environment variables:', missing.join(', '));
+    process.exit(1);
+  }
+}

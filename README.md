@@ -141,6 +141,12 @@ We use Docker Compose to run the entire application stack locally (Frontend, Bac
 - **Frontend Build Configuration**: The frontend (`interview_frontend`) uses a multi-stage Docker build and is served statically by Nginx. The Nginx reverse proxy routes `/api` and `/socket.io` directly to the backend container. Because Vite variables are embedded at build time, `VITE_API_URL=/api` is passed as a build argument in the Dockerfile.
 - **Yjs State**: Collaborative coding sessions (Yjs documents) are stored in-memory on the backend. Restarting the backend container will clear active coding sessions.
 - **Judge0 Webhooks**: If you are using a public Judge0 instance (e.g., the public API), it will not be able to reach your `localhost` backend to deliver execution webhooks. To test Judge0 execution locally, either self-host Judge0 on the same Docker network or use a tunneling service (like ngrok) and update `JUDGE0_CALLBACK_URL` in `.env`.
+- **Graceful Shutdown**: The backend server is configured to handle `SIGINT` and `SIGTERM` signals for graceful shutdown. It stops accepting new HTTP connections, cleanly disconnects Socket.io clients, and ends PostgreSQL and Redis connections with a 10s timeout to prevent hanging.
+- **Rate Limiting**:
+  - **Auth Routes (`/register`, `/login`)**: Protected by an in-memory IP-based rate limiter (default: 10 reqs / 15 mins). Limitation: Limits do not sync across instances (if scaled horizontally) and are reset on process restart.
+  - **Execution Routes (`/execute`, `/submit`)**: Protected by a Redis-based rate limiter per authenticated user (default: 5 reqs / 10 secs).
+  - Rate limits can be configured via environment variables (`AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `EXEC_RATE_LIMIT_WINDOW_MS`, `EXEC_RATE_LIMIT_MAX`).
+- **Production Configuration Validation**: If `NODE_ENV=production`, the application will immediately crash on startup if critical environment variables (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`) are missing or using insecure fallback defaults.
 
 ## Continuous Integration (CI)
 GitHub Actions is configured to run automated CI checks:
@@ -148,7 +154,7 @@ GitHub Actions is configured to run automated CI checks:
 - Triggers on every `pull_request` targeting `main`.
 - Validates the current project foundation: verifies clean dependency installation (`npm ci`), verifies backend source code validity, and compiles the frontend production build.
 - A failed CI workflow indicates an issue in the foundation that must be resolved before merging.
-- Note: Automated test suites and linters are not yet configured in Phase 0; they will be integrated as feature phases introduce testable logic.
+- The workflow automatically runs the backend test suite using Jest to ensure code correctness and prevent regressions.
 
 ## Architecture Documentation
 Detailed system architecture and technical design specifications are available in [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
