@@ -148,6 +148,67 @@ We use Docker Compose to run the entire application stack locally (Frontend, Bac
   - Rate limits can be configured via environment variables (`AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `EXEC_RATE_LIMIT_WINDOW_MS`, `EXEC_RATE_LIMIT_MAX`).
 - **Production Configuration Validation**: If `NODE_ENV=production`, the application will immediately crash on startup if critical environment variables (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`) are missing or using insecure fallback defaults.
 
+## AWS EC2 Production Deployment
+
+This project includes a production-ready Docker Compose configuration (`docker-compose.prod.yml`) intended for a single-server AWS EC2 deployment using Ubuntu Linux.
+
+### 1. Server Setup
+
+Provision an AWS EC2 instance (Ubuntu) and configure its Security Group to allow inbound traffic on:
+- **Port 80 (HTTP)** for frontend access.
+- **Port 22 (SSH)** for secure server management.
+
+Do **not** open ports 5432, 6379, or 5000 to the internet. The production configuration correctly isolates these internal services on the Docker network.
+
+Install Docker and Docker Compose on your EC2 instance.
+
+### 2. Configuration (`.env`)
+
+Clone the repository to your EC2 instance and create a production `.env` file from the example:
+```bash
+cp .env.example .env
+```
+
+Update the following critical environment variables for production:
+- `POSTGRES_PASSWORD`: A strong password for the database.
+- `DATABASE_URL`: Must match the PostgreSQL configuration. Ensure the password is URL-encoded if it contains special characters. Example: `postgresql://postgres:<URL_ENCODED_PASSWORD>@postgres:5432/interview_db`.
+- `JWT_SECRET`: Generate a long, cryptographically secure random string.
+- `JUDGE0_CALLBACK_SECRET`: Generate a secure string for webhooks.
+- `JUDGE0_BASE_URL`: The URL of the public Judge0 API you are using.
+- `JUDGE0_CALLBACK_URL`: Must be reachable by the public Judge0 instance. Do not use `localhost`. Set this to your EC2 instance's public IP address, e.g., `http://<EC2-PUBLIC-IP>/api/executions/judge0/callback`.
+- `VITE_FRONTEND_URL`: Update to `http://<EC2-PUBLIC-IP>`.
+
+*Note: Redis persistence has been disabled in the production configuration because it is only used for ephemeral rate limiting and Socket.io coordination. Redis data does not need to survive container restarts.*
+
+### 3. Build and Start Production Services
+
+The production Compose file ensures proper port bindings (`80:80`), limits exposed ports, and includes `restart: unless-stopped` policies.
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+### 4. Database Setup & Migrations
+
+To apply the initial PostgreSQL database schema, you must run the migration script inside the backend container after the services have started:
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend npm run migrate
+```
+*(This command safely applies pending SQL files from `src/db/migrations` using a migrations tracking table. It is safe to run multiple times and prevents duplicate execution.)*
+
+### 5. HTTPS / SSL Limitation
+
+The current deployment exposes the application over HTTP on port 80. HTTP traffic is not encrypted in transit. This is a significant security limitation, especially concerning the transmission of authentication cookies, user sessions, and private code.
+
+**This deployment must not be described as fully production-ready or used for real users until HTTPS is configured.**
+
+HTTPS can be added later using a suitable approach, such as:
+- A custom domain with Let's Encrypt and Certbot running alongside Nginx.
+- An AWS Application Load Balancer (ALB) with TLS termination configured in front of the EC2 instance.
+
+Until HTTPS is properly configured, this deployment should be treated strictly as a temporary demonstration environment.
+
 ## Continuous Integration (CI)
 GitHub Actions is configured to run automated CI checks:
 - Triggers on every `push` to `main`.
