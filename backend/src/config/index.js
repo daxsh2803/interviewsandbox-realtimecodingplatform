@@ -3,6 +3,7 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.e
 module.exports = {
   port: process.env.PORT || 5000,
   databaseUrl: process.env.DATABASE_URL,
+  databaseCaCert: process.env.SUPABASE_CA_CERT,
   redisUrl: process.env.REDIS_URL,
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret: process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod',
@@ -28,6 +29,9 @@ module.exports = {
 if (module.exports.nodeEnv === 'production') {
   const missing = [];
   if (!process.env.DATABASE_URL) missing.push('DATABASE_URL');
+  if (!process.env.SUPABASE_CA_CERT) {
+    console.warn('WARNING: SUPABASE_CA_CERT is missing. If connecting to Supabase via IPv4, the PostgreSQL SSL connection will fail without blindly disabling certificate verification.');
+  }
   if (!process.env.REDIS_URL) missing.push('REDIS_URL');
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback_secret_do_not_use_in_prod') {
     missing.push('JWT_SECRET (must be securely set)');
