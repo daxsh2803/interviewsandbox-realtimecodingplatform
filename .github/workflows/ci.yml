@@ -34,8 +34,9 @@ jobs:
 
       - name: Wait for PostgreSQL
         run: |
-          while ! docker exec interview_postgres pg_isready -U postgres -d interview_db; do
-            sleep 1
+          while ! docker exec interview_postgres pg_isready -h 127.0.0.1 -U postgres -d interview_db; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
           done
 
       - name: Run database migrations
