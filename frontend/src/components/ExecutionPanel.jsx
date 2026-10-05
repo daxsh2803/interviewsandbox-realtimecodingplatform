@@ -45,7 +45,7 @@ export const ExecutionPanel = ({ yDoc, language, interviewId, problemId, disable
     setExecutionResult({ status: 'Submitting...' });
 
     try {
-      const sourceCode = yDoc.getText('monaco').toString();
+      const sourceCode = yDoc.getText('sourceCode').toString();
       
       const response = await apiClient(`/interviews/${interviewId}/execute`, {
         method: 'POST',
@@ -69,7 +69,7 @@ export const ExecutionPanel = ({ yDoc, language, interviewId, problemId, disable
     setSubmissionResult({ status: 'Submitting...' });
 
     try {
-      const sourceCode = yDoc.getText('monaco').toString();
+      const sourceCode = yDoc.getText('sourceCode').toString();
       
       const response = await apiClient(`/interviews/${interviewId}/problems/${problemId}/submit`, {
         method: 'POST',
@@ -85,7 +85,7 @@ export const ExecutionPanel = ({ yDoc, language, interviewId, problemId, disable
   };
 
   return (
-    <div className="execution-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+    <div className="execution-panel" style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
       <div className="execution-toolbar" style={{ padding: '0.5rem 1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '0.5rem' }}>
         <button 
           className="btn btn-primary" 
