@@ -114,7 +114,7 @@ describe('Submission API', () => {
     );
 
     const res = await request(app)
-      .post('/api/executions/judge0/callback?type=submission')
+      .put('/api/executions/judge0/callback?type=submission')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({
         token: 'mock-sub-token-abc',
@@ -151,7 +151,7 @@ describe('Submission API', () => {
     );
 
     const res = await request(app)
-      .post('/api/executions/judge0/callback?type=submission')
+      .put('/api/executions/judge0/callback?type=submission')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({
         token: 'mock-sub-token-mismatch',
@@ -172,7 +172,7 @@ expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
 
   it('should reject callback with missing or incorrect secret', async () => {
     const res1 = await request(app)
-      .post('/api/executions/judge0/callback?type=submission')
+      .put('/api/executions/judge0/callback?type=submission')
       .send({
         token: 'mock-token',
         status: { id: 3 }
@@ -180,7 +180,7 @@ expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
     expect(res1.status).toBe(403);
 
     const res2 = await request(app)
-      .post('/api/executions/judge0/callback?type=submission')
+      .put('/api/executions/judge0/callback?type=submission')
       .set('x-judge0-callback-secret', 'wrong_secret')
       .send({
         token: 'mock-token',
@@ -221,14 +221,14 @@ expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
     // Callback for Submission A (Wrong Answer)
     judge0Client.mapJudge0Status.mockReturnValue('Wrong Answer');
     await request(app)
-      .post('/api/executions/judge0/callback?type=submission')
+      .put('/api/executions/judge0/callback?type=submission')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({ token: 'token-A1', status: { id: 4 }, stdout: 'wrong\n' });
 
     // Callback for Submission B (Accepted)
     judge0Client.mapJudge0Status.mockReturnValue('Accepted');
     await request(app)
-      .post('/api/executions/judge0/callback?type=submission')
+      .put('/api/executions/judge0/callback?type=submission')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({ token: 'token-B1', status: { id: 3 }, stdout: 'out\n' });
 

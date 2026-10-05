@@ -107,7 +107,7 @@ describe('Execution API', () => {
     const execId = execRes.rows[0].id;
 
     const res = await request(app)
-      .post('/api/executions/judge0/callback')
+      .put('/api/executions/judge0/callback')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({
         token: 'mock-token-abc',
@@ -137,7 +137,7 @@ describe('Execution API', () => {
     judge0Client.mapJudge0Status.mockReturnValue('Wrong Answer');
 
     const res = await request(app)
-      .post('/api/executions/judge0/callback')
+      .put('/api/executions/judge0/callback')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({
         token: 'mock-token-terminal',
@@ -155,7 +155,7 @@ describe('Execution API', () => {
 
   it('should reject callback with missing secret', async () => {
     const res = await request(app)
-      .post('/api/executions/judge0/callback')
+      .put('/api/executions/judge0/callback')
       .send({
         token: 'mock-token',
         status: { id: 3 }
@@ -166,7 +166,7 @@ describe('Execution API', () => {
 
   it('should reject callback with incorrect secret', async () => {
     const res = await request(app)
-      .post('/api/executions/judge0/callback')
+      .put('/api/executions/judge0/callback')
       .set('x-judge0-callback-secret', 'wrong_secret')
       .send({
         token: 'mock-token',
