@@ -4,6 +4,8 @@ const Y = require('yjs');
 const docs = new Map();
 // Map of "interviewId:problemId" -> Set<socketId>
 const docSockets = new Map();
+// Map of "interviewId:problemId" -> NodeJS.Timeout
+const pendingCleanups = new Map();
 
 /**
  * Get or create a Yjs document for an interview problem.
@@ -21,6 +23,10 @@ const attachSocketToDoc = (interviewId, problemId, socketId) => {
   const docId = `${interviewId}:${problemId}`;
   if (docSockets.has(docId)) {
     docSockets.get(docId).add(socketId);
+    if (pendingCleanups.has(docId)) {
+      clearTimeout(pendingCleanups.get(docId));
+      pendingCleanups.delete(docId);
+    }
   }
 };
 
@@ -29,10 +35,17 @@ const cleanupSocketFromDocs = (socketId) => {
     if (sockets.has(socketId)) {
       sockets.delete(socketId);
       if (sockets.size === 0) {
-        const doc = docs.get(docId);
-        if (doc) doc.destroy();
-        docs.delete(docId);
-        docSockets.delete(docId);
+        if (!pendingCleanups.has(docId)) {
+          const ttl = process.env.YJS_DOC_CLEANUP_TTL_MS || 300000;
+          const timer = setTimeout(() => {
+            const doc = docs.get(docId);
+            if (doc) doc.destroy();
+            docs.delete(docId);
+            docSockets.delete(docId);
+            pendingCleanups.delete(docId);
+          }, ttl);
+          pendingCleanups.set(docId, timer);
+        }
       }
     }
   }
@@ -134,4 +147,4 @@ const registerYjsHandlers = (socket) => {
   });
 };
 
-module.exports = { registerYjsHandlers, getDoc, docs, docSockets, cleanupSocketFromDocs };
+module.exports = { registerYjsHandlers, getDoc, docs, docSockets, cleanupSocketFromDocs, attachSocketToDoc, pendingCleanups };

@@ -179,10 +179,10 @@ describe('Yjs Real-Time Collaboration', () => {
           client1.disconnect();
           
           setTimeout(() => {
-            // Document should be removed from memory
-            expect(docs.has(`${interviewId}:${problemId}`)).toBe(false);
+            // Document should remain in memory due to TTL
+            expect(docs.has(`${interviewId}:${problemId}`)).toBe(true);
             
-            // Reconnect a new client to verify it recreates successfully
+            // Reconnect a new client to verify it attaches successfully
             setupClient('user-1-reconnect', (c2) => {
               client2 = c2;
               client2.emit('interview:join', { interviewId });
@@ -194,8 +194,15 @@ describe('Yjs Real-Time Collaboration', () => {
                   expect(docs.has(`${interviewId}:${problemId}`)).toBe(true);
                   const newDoc = new Y.Doc();
                   Y.applyUpdate(newDoc, new Uint8Array(payload.update));
-                  // It should be empty again since the previous doc was destroyed from memory
-                  expect(newDoc.getText('sourceCode').toString()).toBe('');
+                  // It should have the previous code since the doc was NOT destroyed
+                  expect(newDoc.getText('sourceCode').toString()).toBe('test code');
+                  
+                  // Clean up the timer so Jest can exit cleanly
+                  const { pendingCleanups } = require('../yjsManager');
+                  if (pendingCleanups && pendingCleanups.has(`${interviewId}:${problemId}`)) {
+                    clearTimeout(pendingCleanups.get(`${interviewId}:${problemId}`));
+                  }
+                  
                   done();
                 });
               });
