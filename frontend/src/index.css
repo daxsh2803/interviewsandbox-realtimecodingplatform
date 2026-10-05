@@ -211,13 +211,18 @@ a:hover {
 
 /* Page Transitions */
 .page-enter {
-  opacity: 0;
-  transform: translateY(10px);
+  animation: pageEnter 300ms forwards;
 }
-.page-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 300ms, transform 300ms;
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Layout */
