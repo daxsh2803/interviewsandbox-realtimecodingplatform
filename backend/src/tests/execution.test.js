@@ -107,21 +107,50 @@ describe('Execution API', () => {
     const execId = execRes.rows[0].id;
 
     const res = await request(app)
-      .put('/api/executions/judge0/callback')
+      .put('/api/executions/judge0/callback?base64=true')
       .set('x-judge0-callback-secret', config.judge0.callbackSecret)
       .send({
         token: 'mock-token-abc',
         status: { id: 3 }, // 3 is accepted
-        stdout: 'aGVsbG8=', // base64 of 'hello' (mock) Wait, our implementation expects string directly. Let's send raw string.
+        stdout: 'aGVsbG8=', // base64 of 'hello'
+        stderr: null, // should remain null
+        compile_output: null,
         time: '0.045',
         memory: 1234
       });
 
     expect(res.status).toBe(200);
 
-    const dbRes = await db.query('SELECT status, stdout, execution_time_ms FROM code_executions WHERE id = $1', [execId]);
+    const dbRes = await db.query('SELECT status, stdout, stderr, execution_time_ms FROM code_executions WHERE id = $1', [execId]);
     expect(dbRes.rows[0].status).toBe('Accepted');
+    expect(dbRes.rows[0].stdout).toBe('hello');
+    expect(dbRes.rows[0].stderr).toBeNull();
     expect(dbRes.rows[0].execution_time_ms).toBe(45); // 0.045 * 1000
+  });
+
+  it('should NOT decode plain text that is valid Base64 when callback is declared plain text', async () => {
+    judge0Client.mapJudge0Status.mockReturnValue('Accepted');
+
+    const execRes = await db.query(
+      `INSERT INTO code_executions (interview_id, user_id, problem_id, language, source_code, status, judge0_token)
+       VALUES ($1, $2, $3, 'javascript', 'code', 'Processing', 'mock-token-test') RETURNING id`,
+      [interview.id, user.id, problem.id]
+    );
+    const execId = execRes.rows[0].id;
+
+    const res = await request(app)
+      .put('/api/executions/judge0/callback')
+      .set('x-judge0-callback-secret', config.judge0.callbackSecret)
+      .send({
+        token: 'mock-token-test',
+        status: { id: 3 },
+        stdout: 'test' // valid base64 but intended as plain text
+      });
+
+    expect(res.status).toBe(200);
+
+    const dbRes = await db.query('SELECT stdout FROM code_executions WHERE id = $1', [execId]);
+    expect(dbRes.rows[0].stdout).toBe('test');
   });
 
   it('should be idempotent and not overwrite terminal states', async () => {

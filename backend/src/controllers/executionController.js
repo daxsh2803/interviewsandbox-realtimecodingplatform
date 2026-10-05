@@ -49,7 +49,15 @@ exports.executeCode = async (req, res, next) => {
     const executionId = insertRes.rows[0].id;
 
     // Submit to Judge0 async
-    judge0Client.submitCode({ sourceCode, language, stdin, executionId })
+    judge0Client.submitCode({
+      sourceCode,
+      language,
+      stdin,
+      executionId,
+      callbackUrlOverride: config.judge0.callbackUrl
+        ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&base64=true`
+        : undefined
+    })
       .then(async (token) => {
         // Save the token
         await db.query(`UPDATE code_executions SET judge0_token = $1 WHERE id = $2`, [token, executionId]);
@@ -100,10 +108,16 @@ exports.judge0Callback = async (req, res, next) => {
        return res.status(403).json({ error: 'Unauthorized callback' });
     }
 
-    const { token, status, stdout, stderr, compile_output, time, memory } = req.body;
+    let { token, status, stdout, stderr, compile_output, time, memory } = req.body;
 
     if (!token || !status) {
       return res.status(400).json({ error: 'Missing token or status' });
+    }
+
+    if (req.query.base64 === 'true') {
+      if (typeof stdout === 'string') stdout = Buffer.from(stdout, 'base64').toString('utf8');
+      if (typeof stderr === 'string') stderr = Buffer.from(stderr, 'base64').toString('utf8');
+      if (typeof compile_output === 'string') compile_output = Buffer.from(compile_output, 'base64').toString('utf8');
     }
 
     // Map Judge0 status to internal status
