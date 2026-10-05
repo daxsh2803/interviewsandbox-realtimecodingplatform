@@ -3,7 +3,6 @@ const judge0Client = require('../services/judge0Client');
 const { getSocketIo } = require('../socket');
 const config = require('../config');
 
-// Shared utility to compute final verdict
 const normalizeOutput = (str) => {
   if (typeof str !== 'string') return '';
   return str.replace(/\r\n/g, '\n').trimEnd();
@@ -18,7 +17,7 @@ const evaluateTestCases = async (submissionId, interviewId) => {
      WHERE sr.submission_id = $1`,
     [submissionId]
   );
-  
+
   if (results.rowCount === 0) return;
 
   const hasProcessing = results.rows.some(r => r.status === 'Processing');
@@ -92,14 +91,14 @@ exports.submitCode = async (req, res, next) => {
     if (!problemId || !language || !sourceCode) {
       return res.status(400).json({ error: 'problemId, language, and sourceCode are required.' });
     }
-    
+
     if (sourceCode.length > 50000) {
       return res.status(400).json({ error: 'Source code is too large.' });
     }
 
     const interviewRes = await db.query(
-      `SELECT ip.role, i.status 
-       FROM interview_participants ip 
+      `SELECT ip.role, i.status
+       FROM interview_participants ip
        JOIN interview_problems iprob ON ip.interview_id = iprob.interview_id
        JOIN interviews i ON ip.interview_id = i.id
        WHERE ip.interview_id = $1 AND ip.user_id = $2 AND iprob.problem_id = $3`,
@@ -122,7 +121,7 @@ exports.submitCode = async (req, res, next) => {
 
     // Insert submission
     const insertSub = await db.query(
-      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status) 
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
        VALUES ($1, $2, $3, $4, $5, 'Processing') RETURNING id`,
       [interviewId, userId, problemId, language, sourceCode]
     );
@@ -161,8 +160,8 @@ exports.submitCode = async (req, res, next) => {
               language,
               stdin: tc.input,
               executionId: `subres-${resultId}`,
-              callbackUrlOverride: config.judge0.callbackUrl 
-                ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&type=submission` 
+              callbackUrlOverride: config.judge0.callbackUrl
+                ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&type=submission&base64=true`
                 : undefined
             });
             await db.query(`UPDATE submission_results SET judge0_token = $1 WHERE id = $2`, [token, resultId]);
@@ -194,16 +193,22 @@ exports.submissionCallback = async (req, res, next) => {
       return next(); // Pass to next handler if not submission type
     }
 
-    const { token, status, stdout, stderr, compile_output, time, memory } = req.body;
+    let { token, status, stdout, stderr, compile_output, time, memory } = req.body;
     if (!token || !status) {
       return res.status(400).json({ error: 'Missing token or status' });
+    }
+
+    if (req.query.base64 === 'true') {
+      if (typeof stdout === 'string') stdout = Buffer.from(stdout, 'base64').toString('utf8');
+      if (typeof stderr === 'string') stderr = Buffer.from(stderr, 'base64').toString('utf8');
+      if (typeof compile_output === 'string') compile_output = Buffer.from(compile_output, 'base64').toString('utf8');
     }
 
     let appStatus = judge0Client.mapJudge0Status(status.id);
     const finalStderr = compile_output ? (stderr ? compile_output + '\\n' + stderr : compile_output) : stderr;
 
     const updateRes = await db.query(
-      `UPDATE submission_results 
+      `UPDATE submission_results
        SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
        WHERE judge0_token = $6 AND status = 'Processing'
        RETURNING id, submission_id`,

@@ -24,7 +24,7 @@ describe('Submission API', () => {
     await db.query('DELETE FROM users');
     await db.query('DELETE FROM problems');
     await db.query('DELETE FROM interviews');
-    
+
     const userRes = await db.query(
       "INSERT INTO users (email, password_hash, name) VALUES ('sub_user@test.com', 'hash', 'Sub User') RETURNING id, email"
     );
@@ -84,7 +84,7 @@ describe('Submission API', () => {
     // Verify DB insertion
     const dbRes = await db.query('SELECT status FROM submissions WHERE id = $1', [res.body.submissionId]);
     expect(dbRes.rows[0].status).toBe('Processing');
-    
+
     // Wait for the background task to complete
     let attempts = 0;
     let tcRes;
@@ -101,14 +101,14 @@ describe('Submission API', () => {
     judge0Client.mapJudge0Status.mockReturnValue('Accepted');
 
     const subRes = await db.query(
-      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status) 
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
        VALUES ($1, $2, $3, 'javascript', 'code', 'Processing') RETURNING id`,
       [interview.id, user.id, problem.id]
     );
     const subId = subRes.rows[0].id;
 
     await db.query(
-      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token) 
+      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token)
        VALUES ($1, $2, 'Processing', 'mock-sub-token-abc')`,
       [subId, testCase.id]
     );
@@ -119,7 +119,7 @@ describe('Submission API', () => {
       .send({
         token: 'mock-sub-token-abc',
         status: { id: 3 }, // 3 is accepted
-        stdout: 'out\n',
+        stdout: 'out\n', // plain text
         time: '0.045',
         memory: 1234
       });
@@ -128,7 +128,7 @@ describe('Submission API', () => {
 
     const dbSubRes = await db.query('SELECT status FROM submission_results WHERE submission_id = $1', [subId]);
     expect(dbSubRes.rows[0].status).toBe('Accepted');
-    
+
     // Should compute final verdict
     const finalSubRes = await db.query('SELECT status FROM submissions WHERE id = $1', [subId]);
     expect(finalSubRes.rows[0].status).toBe('Accepted');
@@ -170,6 +170,96 @@ expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
     expect(finalSubRes.rows[0].status).toBe('Wrong Answer');
   });
 
+  it('should correctly decode base64 stdout "5\\n" and mark as Accepted if it matches expected', async () => {
+    judge0Client.mapJudge0Status.mockReturnValue('Accepted');
+
+    // Create a new test case for '5'
+    const tc5Res = await db.query(
+      "INSERT INTO test_cases (problem_id, input, expected_output) VALUES ($1, 'in5', '5') RETURNING id",
+      [problem.id]
+    );
+    const tc5 = tc5Res.rows[0];
+
+    const subRes = await db.query(
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
+       VALUES ($1, $2, $3, 'javascript', 'console.log(add(2,3));', 'Processing') RETURNING id`,
+      [interview.id, user.id, problem.id]
+    );
+    const subId = subRes.rows[0].id;
+
+    await db.query(
+      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token)
+       VALUES ($1, $2, 'Processing', 'mock-sub-token-5')`,
+      [subId, tc5.id]
+    );
+
+    const res = await request(app)
+      .put('/api/executions/judge0/callback?type=submission&base64=true')
+      .set('x-judge0-callback-secret', config.judge0.callbackSecret)
+      .send({
+        token: 'mock-sub-token-5',
+        status: { id: 3 }, // 3 is accepted
+        stdout: 'NQo=', // base64 of "5\n"
+        stderr: null, // should remain null
+        compile_output: 'Y29tcGlsZWQ=', // base64 of "compiled"
+        time: '0.045',
+        memory: 1234
+      });
+
+    expect(res.status).toBe(200);
+
+    const dbSubRes = await db.query('SELECT status, stdout, stderr FROM submission_results WHERE submission_id = $1', [subId]);
+    expect(dbSubRes.rows[0].status).toBe('Accepted');
+    expect(dbSubRes.rows[0].stdout).toBe('5\n');
+    expect(dbSubRes.rows[0].stderr).toBe('compiled');
+
+    const finalSubRes = await db.query('SELECT status FROM submissions WHERE id = $1', [subId]);
+    expect(finalSubRes.rows[0].status).toBe('Accepted');
+  });
+
+  it('should NOT decode plain text that is valid Base64 when callback is declared plain text', async () => {
+    judge0Client.mapJudge0Status.mockReturnValue('Accepted');
+
+    const tcTestRes = await db.query(
+      "INSERT INTO test_cases (problem_id, input, expected_output) VALUES ($1, 'in', 'test') RETURNING id",
+      [problem.id]
+    );
+    const tcTest = tcTestRes.rows[0];
+
+    const subRes = await db.query(
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
+       VALUES ($1, $2, $3, 'javascript', 'console.log("test");', 'Processing') RETURNING id`,
+      [interview.id, user.id, problem.id]
+    );
+    const subId = subRes.rows[0].id;
+
+    await db.query(
+      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token)
+       VALUES ($1, $2, 'Processing', 'mock-sub-token-test')`,
+      [subId, tcTest.id]
+    );
+
+    // No base64=true in URL
+    const res = await request(app)
+      .put('/api/executions/judge0/callback?type=submission')
+      .set('x-judge0-callback-secret', config.judge0.callbackSecret)
+      .send({
+        token: 'mock-sub-token-test',
+        status: { id: 3 },
+        stdout: 'test', // "test" is valid base64 but is intended as plain text here
+        time: '0.045',
+        memory: 1234
+      });
+
+    expect(res.status).toBe(200);
+
+    const dbSubRes = await db.query('SELECT status, stdout FROM submission_results WHERE submission_id = $1', [subId]);
+    expect(dbSubRes.rows[0].stdout).toBe('test'); // Remained plain text
+
+    const finalSubRes = await db.query('SELECT status FROM submissions WHERE id = $1', [subId]);
+    expect(finalSubRes.rows[0].status).toBe('Accepted'); // Because 'test' === 'test'
+  });
+
   it('should reject callback with missing or incorrect secret', async () => {
     const res1 = await request(app)
       .put('/api/executions/judge0/callback?type=submission')
@@ -192,28 +282,28 @@ expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
   it('should keep concurrent submissions isolated', async () => {
     // Create Submission A
     const subARes = await db.query(
-      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status) 
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
        VALUES ($1, $2, $3, 'javascript', 'code A', 'Processing') RETURNING id`,
       [interview.id, user.id, problem.id]
     );
     const subAId = subARes.rows[0].id;
 
     await db.query(
-      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token) 
+      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token)
        VALUES ($1, $2, 'Processing', 'token-A1')`,
       [subAId, testCase.id]
     );
 
     // Create Submission B
     const subBRes = await db.query(
-      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status) 
+      `INSERT INTO submissions (interview_id, user_id, problem_id, language, source_code, status)
        VALUES ($1, $2, $3, 'javascript', 'code B', 'Processing') RETURNING id`,
       [interview.id, user.id, problem.id]
     );
     const subBId = subBRes.rows[0].id;
 
     await db.query(
-      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token) 
+      `INSERT INTO submission_results (submission_id, test_case_id, status, judge0_token)
        VALUES ($1, $2, 'Processing', 'token-B1')`,
       [subBId, testCase.id]
     );
