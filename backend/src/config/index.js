@@ -11,7 +11,7 @@ module.exports = {
     baseUrl: process.env.JUDGE0_BASE_URL || 'http://localhost:2358',
     apiKey: process.env.JUDGE0_API_KEY,
     callbackUrl: process.env.JUDGE0_CALLBACK_URL || 'http://localhost:5000/api/executions/judge0/callback',
-    callbackSecret: process.env.JUDGE0_CALLBACK_SECRET || 'fallback_judge0_webhook_secret',
+    callbackSecret: process.env.JUDGE0_CALLBACK_SECRET,
     cpuTimeLimit: parseFloat(process.env.JUDGE0_CPU_TIME_LIMIT) || 2.0,
     wallTimeLimit: parseFloat(process.env.JUDGE0_WALL_TIME_LIMIT) || 5.0,
     memoryLimit: parseInt(process.env.JUDGE0_MEMORY_LIMIT, 10) || 128000,
@@ -28,17 +28,37 @@ module.exports = {
 
 if (module.exports.nodeEnv === 'production') {
   const missing = [];
-  if (!process.env.DATABASE_URL) missing.push('DATABASE_URL');
-  if (!process.env.SUPABASE_CA_CERT) {
-    console.warn('WARNING: SUPABASE_CA_CERT is missing. If connecting to Supabase via IPv4, the PostgreSQL SSL connection will fail without blindly disabling certificate verification.');
+
+  if (!process.env.DATABASE_URL) {
+    missing.push('DATABASE_URL');
   }
-  if (!process.env.REDIS_URL) missing.push('REDIS_URL');
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback_secret_do_not_use_in_prod') {
+
+  if (!process.env.SUPABASE_CA_CERT) {
+    console.warn(
+      'WARNING: SUPABASE_CA_CERT is missing. If connecting to Supabase via IPv4, the PostgreSQL SSL connection will fail without blindly disabling certificate verification.'
+    );
+  }
+
+  if (!process.env.REDIS_URL) {
+    missing.push('REDIS_URL');
+  }
+
+  if (
+    !process.env.JWT_SECRET ||
+    process.env.JWT_SECRET === 'fallback_secret_do_not_use_in_prod'
+  ) {
     missing.push('JWT_SECRET (must be securely set)');
   }
 
+  if (!process.env.JUDGE0_CALLBACK_SECRET) {
+    missing.push('JUDGE0_CALLBACK_SECRET (must be securely set)');
+  }
+
   if (missing.length > 0) {
-    console.error('CRITICAL: Missing required production environment variables:', missing.join(', '));
+    console.error(
+      'CRITICAL: Missing required production environment variables:',
+      missing.join(', ')
+    );
     process.exit(1);
   }
 }

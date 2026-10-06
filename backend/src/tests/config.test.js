@@ -14,6 +14,7 @@ describe('Production Config Validation', () => {
 
   it('should not throw in development mode', () => {
     process.env.NODE_ENV = 'development';
+
     expect(() => {
       require('../config');
     }).not.toThrow();
@@ -26,10 +27,12 @@ describe('Production Config Validation', () => {
     beforeEach(() => {
       exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
       errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
       process.env.NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/db';
       process.env.REDIS_URL = 'redis://localhost:6379';
       process.env.JWT_SECRET = 'secure_secret_key';
+      process.env.JUDGE0_CALLBACK_SECRET = 'secure_callback_secret';
     });
 
     afterEach(() => {
@@ -39,38 +42,72 @@ describe('Production Config Validation', () => {
 
     it('should exit if DATABASE_URL is missing', () => {
       delete process.env.DATABASE_URL;
+
       require('../config');
+
       expect(exitSpy).toHaveBeenCalledTimes(1);
       expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('CRITICAL'), expect.stringContaining('DATABASE_URL'));
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRITICAL'),
+        expect.stringContaining('DATABASE_URL')
+      );
     });
 
     it('should exit if REDIS_URL is missing', () => {
       delete process.env.REDIS_URL;
+
       require('../config');
+
       expect(exitSpy).toHaveBeenCalledTimes(1);
       expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('CRITICAL'), expect.stringContaining('REDIS_URL'));
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRITICAL'),
+        expect.stringContaining('REDIS_URL')
+      );
     });
 
     it('should exit if JWT_SECRET is missing', () => {
       delete process.env.JWT_SECRET;
+
       require('../config');
+
       expect(exitSpy).toHaveBeenCalledTimes(1);
       expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('CRITICAL'), expect.stringContaining('JWT_SECRET'));
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRITICAL'),
+        expect.stringContaining('JWT_SECRET')
+      );
     });
 
     it('should exit if JWT_SECRET is the fallback', () => {
       process.env.JWT_SECRET = 'fallback_secret_do_not_use_in_prod';
+
       require('../config');
+
       expect(exitSpy).toHaveBeenCalledTimes(1);
       expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('CRITICAL'), expect.stringContaining('JWT_SECRET'));
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRITICAL'),
+        expect.stringContaining('JWT_SECRET')
+      );
+    });
+
+    it('should exit if JUDGE0_CALLBACK_SECRET is missing', () => {
+      delete process.env.JUDGE0_CALLBACK_SECRET;
+
+      require('../config');
+
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRITICAL'),
+        expect.stringContaining('JUDGE0_CALLBACK_SECRET')
+      );
     });
 
     it('should not exit if all production variables are present', () => {
       require('../config');
+
       expect(exitSpy).not.toHaveBeenCalled();
     });
   });
