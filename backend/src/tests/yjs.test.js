@@ -16,12 +16,14 @@ describe('Yjs Real-Time Collaboration', () => {
   let io, client1, client2;
   let httpServer;
   let port;
+
   const interviewId = 'int-1';
   const problemId = 'prob-1';
 
   beforeAll((done) => {
     httpServer = createServer();
     io = initSocket(httpServer);
+
     httpServer.listen(() => {
       port = httpServer.address().port;
       done();
@@ -36,9 +38,24 @@ describe('Yjs Real-Time Collaboration', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    docs.clear(); // Clear all Yjs documents from memory before each test
+    docs.clear();
+
     const { docSockets } = require('../yjsManager');
     if (docSockets) docSockets.clear();
+
+    // Default DB behavior:
+    // - Any problem is treated as assigned to the interview.
+    // - The participant is a candidate.
+    // - The interview is in progress.
+    db.query.mockImplementation((queryStr) => {
+      if (queryStr.includes('FROM interview_problems')) {
+        return Promise.resolve({ rows: [{ '?column?': 1 }] });
+      }
+
+      return Promise.resolve({
+        rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }]
+      });
+    });
   });
 
   afterEach(() => {
@@ -48,15 +65,15 @@ describe('Yjs Real-Time Collaboration', () => {
 
   const setupClient = (userId, done) => {
     const token = jwt.sign({ userId }, config.jwtSecret);
+
     const client = new Client(`http://localhost:${port}`, {
       extraHeaders: { Cookie: `auth_token=${token}` }
     });
+
     client.on('connect', () => done(client));
   };
 
   it('should synchronize Yjs state between two connected participants', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
-
     setupClient('user-1', (c1) => {
       client1 = c1;
       client1.emit('interview:join', { interviewId });
@@ -73,7 +90,6 @@ describe('Yjs Real-Time Collaboration', () => {
             text1.insert(0, 'Hello World');
 
             const update = Y.encodeStateAsUpdate(doc1);
-            client1.emit('yjs:update', { interviewId, problemId, update: Array.from(update) });
 
             client2.on('yjs:update', (payload) => {
               expect(payload.interviewId).toBe(interviewId);
@@ -81,8 +97,15 @@ describe('Yjs Real-Time Collaboration', () => {
 
               const doc2 = new Y.Doc();
               Y.applyUpdate(doc2, new Uint8Array(payload.update));
+
               expect(doc2.getText('sourceCode').toString()).toBe('Hello World');
               done();
+            });
+
+            client1.emit('yjs:update', {
+              interviewId,
+              problemId,
+              update: Array.from(update)
             });
           });
         });
@@ -91,6 +114,7 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should reject Yjs updates from unauthorized users', (done) => {
+    db.query.mockReset();
     db.query.mockResolvedValueOnce({ rows: [] }); // not a participant
 
     setupClient('unauthorized-user', (c1) => {
@@ -98,22 +122,28 @@ describe('Yjs Real-Time Collaboration', () => {
       client1.emit('interview:join', { interviewId });
 
       client1.on('interview:error', (payload) => {
-        expect(payload.message).toBe('Unauthorized: Not a participant in this interview');
-        
+        expect(payload.message).toBe(
+          'Unauthorized: Not a participant in this interview'
+        );
+
         // Try to sync anyway
-        client1.emit('yjs:sync-step1', { interviewId, problemId, stateVector: [] });
+        client1.emit('yjs:sync-step1', {
+          interviewId,
+          problemId,
+          stateVector: []
+        });
       });
 
       client1.on('yjs:error', (payload) => {
-        expect(payload.message).toBe('Unauthorized for this interview document');
+        expect(payload.message).toBe(
+          'Unauthorized for this interview document'
+        );
         done();
       });
     });
   });
 
   it('should correctly handle late joiner synchronization', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
-
     setupClient('user-1', (c1) => {
       client1 = c1;
       client1.emit('interview:join', { interviewId });
@@ -123,8 +153,12 @@ describe('Yjs Real-Time Collaboration', () => {
         const doc1 = new Y.Doc();
         doc1.getText('sourceCode').insert(0, 'Initial code');
         const update = Y.encodeStateAsUpdate(doc1);
-        
-        client1.emit('yjs:update', { interviewId, problemId, update: Array.from(update) });
+
+        client1.emit('yjs:update', {
+          interviewId,
+          problemId,
+          update: Array.from(update)
+        });
 
         // Wait a bit to simulate late join
         setTimeout(() => {
@@ -135,17 +169,20 @@ describe('Yjs Real-Time Collaboration', () => {
             client2.on('interview:joined', () => {
               const doc2 = new Y.Doc();
               const stateVector = Y.encodeStateVector(doc2);
-              
-              client2.emit('yjs:sync-step1', { 
-                interviewId, 
-                problemId, 
-                stateVector: Array.from(stateVector) 
+
+              client2.emit('yjs:sync-step1', {
+                interviewId,
+                problemId,
+                stateVector: Array.from(stateVector)
               });
 
               client2.on('yjs:sync-step2', (payload) => {
                 expect(payload.interviewId).toBe(interviewId);
                 Y.applyUpdate(doc2, new Uint8Array(payload.update));
-                expect(doc2.getText('sourceCode').toString()).toBe('Initial code');
+
+                expect(doc2.getText('sourceCode').toString()).toBe(
+                  'Initial code'
+                );
                 done();
               });
             });
@@ -156,8 +193,6 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should create document lazily, keep it while active, and destroy it when all sockets leave', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
-    
     expect(docs.has(`${interviewId}:${problemId}`)).toBe(false);
 
     setupClient('user-1', (c1) => {
@@ -166,43 +201,76 @@ describe('Yjs Real-Time Collaboration', () => {
 
       client1.on('interview:joined', () => {
         // Trigger doc creation via sync-step1
-        const emptyStateVector = Array.from(Y.encodeStateVector(new Y.Doc()));
-        client1.emit('yjs:sync-step1', { interviewId, problemId, stateVector: emptyStateVector });
-        
+        const emptyStateVector = Array.from(
+          Y.encodeStateVector(new Y.Doc())
+        );
+
+        client1.emit('yjs:sync-step1', {
+          interviewId,
+          problemId,
+          stateVector: emptyStateVector
+        });
+
         setTimeout(() => {
           expect(docs.has(`${interviewId}:${problemId}`)).toBe(true);
-          
+
           const doc = docs.get(`${interviewId}:${problemId}`);
           doc.getText('sourceCode').insert(0, 'test code');
 
           // Disconnect client to trigger cleanup
           client1.disconnect();
-          
+
           setTimeout(() => {
             // Document should remain in memory due to TTL
             expect(docs.has(`${interviewId}:${problemId}`)).toBe(true);
-            
+
             // Reconnect a new client to verify it attaches successfully
             setupClient('user-1-reconnect', (c2) => {
               client2 = c2;
               client2.emit('interview:join', { interviewId });
+
               client2.on('interview:joined', () => {
-                const emptyStateVector = Array.from(Y.encodeStateVector(new Y.Doc()));
-                client2.emit('yjs:sync-step1', { interviewId, problemId, stateVector: emptyStateVector });
-                
+                const emptyStateVector = Array.from(
+                  Y.encodeStateVector(new Y.Doc())
+                );
+
+                client2.emit('yjs:sync-step1', {
+                  interviewId,
+                  problemId,
+                  stateVector: emptyStateVector
+                });
+
                 client2.on('yjs:sync-step2', (payload) => {
-                  expect(docs.has(`${interviewId}:${problemId}`)).toBe(true);
+                  expect(
+                    docs.has(`${interviewId}:${problemId}`)
+                  ).toBe(true);
+
                   const newDoc = new Y.Doc();
-                  Y.applyUpdate(newDoc, new Uint8Array(payload.update));
+                  Y.applyUpdate(
+                    newDoc,
+                    new Uint8Array(payload.update)
+                  );
+
                   // It should have the previous code since the doc was NOT destroyed
-                  expect(newDoc.getText('sourceCode').toString()).toBe('test code');
-                  
+                  expect(
+                    newDoc.getText('sourceCode').toString()
+                  ).toBe('test code');
+
                   // Clean up the timer so Jest can exit cleanly
                   const { pendingCleanups } = require('../yjsManager');
-                  if (pendingCleanups && pendingCleanups.has(`${interviewId}:${problemId}`)) {
-                    clearTimeout(pendingCleanups.get(`${interviewId}:${problemId}`));
+
+                  if (
+                    pendingCleanups &&
+                    pendingCleanups.has(`${interviewId}:${problemId}`)
+                  ) {
+                    clearTimeout(
+                      pendingCleanups.get(`${interviewId}:${problemId}`)
+                    );
+                    pendingCleanups.delete(
+                      `${interviewId}:${problemId}`
+                    );
                   }
-                  
+
                   done();
                 });
               });
@@ -214,7 +282,6 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should isolate problems within the same interview', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
     const prob1 = 'prob-1';
     const prob2 = 'prob-2';
 
@@ -225,21 +292,37 @@ describe('Yjs Real-Time Collaboration', () => {
       client1.on('interview:joined', () => {
         const doc1 = new Y.Doc();
         doc1.getText('sourceCode').insert(0, 'Problem 1');
-        client1.emit('yjs:update', { interviewId, problemId: prob1, update: Array.from(Y.encodeStateAsUpdate(doc1)) });
+
+        client1.emit('yjs:update', {
+          interviewId,
+          problemId: prob1,
+          update: Array.from(Y.encodeStateAsUpdate(doc1))
+        });
 
         const doc2 = new Y.Doc();
         doc2.getText('sourceCode').insert(0, 'Problem 2');
-        client1.emit('yjs:update', { interviewId, problemId: prob2, update: Array.from(Y.encodeStateAsUpdate(doc2)) });
+
+        client1.emit('yjs:update', {
+          interviewId,
+          problemId: prob2,
+          update: Array.from(Y.encodeStateAsUpdate(doc2))
+        });
 
         setTimeout(() => {
           expect(docs.has(`${interviewId}:${prob1}`)).toBe(true);
           expect(docs.has(`${interviewId}:${prob2}`)).toBe(true);
-          
+
           const srvDoc1 = docs.get(`${interviewId}:${prob1}`);
           const srvDoc2 = docs.get(`${interviewId}:${prob2}`);
-          
-          expect(srvDoc1.getText('sourceCode').toString()).toBe('Problem 1');
-          expect(srvDoc2.getText('sourceCode').toString()).toBe('Problem 2');
+
+          expect(
+            srvDoc1.getText('sourceCode').toString()
+          ).toBe('Problem 1');
+
+          expect(
+            srvDoc2.getText('sourceCode').toString()
+          ).toBe('Problem 2');
+
           done();
         }, 50);
       });
@@ -247,8 +330,6 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   it('should enforce cross-interview isolation and reject updates to other interviews', (done) => {
-    db.query.mockResolvedValue({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
-
     setupClient('user-1', (c1) => {
       client1 = c1;
       client1.emit('interview:join', { interviewId: 'int-1' });
@@ -257,18 +338,126 @@ describe('Yjs Real-Time Collaboration', () => {
         // Try to update an interview the socket isn't authorized for
         const rogueDoc = new Y.Doc();
         rogueDoc.getText('sourceCode').insert(0, 'Hacked');
-        
-        client1.emit('yjs:update', { 
-          interviewId: 'int-2', 
-          problemId, 
-          update: Array.from(Y.encodeStateAsUpdate(rogueDoc)) 
+
+        client1.emit('yjs:update', {
+          interviewId: 'int-2',
+          problemId,
+          update: Array.from(Y.encodeStateAsUpdate(rogueDoc))
         });
 
         client1.on('yjs:error', (payload) => {
-          expect(payload.message).toBe('Unauthorized for this interview document');
+          expect(payload.message).toBe(
+            'Unauthorized for this interview document'
+          );
+
           // Ensure int-2:prob-1 was NEVER created
           expect(docs.has(`int-2:${problemId}`)).toBe(false);
+
           done();
+        });
+      });
+    });
+  });
+
+  it('should reject sync for a problem not assigned to the interview', (done) => {
+    db.query.mockImplementation((queryStr) => {
+      if (queryStr.includes('FROM interview_problems')) {
+        return Promise.resolve({ rows: [] });
+      }
+
+      return Promise.resolve({
+        rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }]
+      });
+    });
+
+    setupClient('user-1', (c1) => {
+      client1 = c1;
+
+      client1.emit('interview:join', { interviewId });
+
+      client1.on('interview:joined', () => {
+        client1.on('yjs:error', (payload) => {
+          expect(payload.message).toBe(
+            'Problem is not assigned to this interview'
+          );
+
+          expect(
+            docs.has(`${interviewId}:problem-not-assigned`)
+          ).toBe(false);
+
+          done();
+        });
+
+        client1.emit('yjs:sync-step1', {
+          interviewId,
+          problemId: 'problem-not-assigned',
+          stateVector: []
+        });
+      });
+    });
+  });
+
+  it('should reject updates for a problem not assigned to the interview', (done) => {
+    db.query.mockImplementation((queryStr) => {
+      if (queryStr.includes('FROM interview_problems')) {
+        return Promise.resolve({ rows: [] });
+      }
+
+      return Promise.resolve({
+        rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }]
+      });
+    });
+
+    setupClient('user-1', (c1) => {
+      client1 = c1;
+
+      client1.emit('interview:join', { interviewId });
+
+      client1.on('interview:joined', () => {
+        setupClient('user-2', (c2) => {
+          client2 = c2;
+
+          client2.emit('interview:join', { interviewId });
+
+          client2.on('interview:joined', () => {
+            const unauthorizedProblem = 'problem-not-assigned';
+
+            const rogueDoc = new Y.Doc();
+            rogueDoc
+              .getText('sourceCode')
+              .insert(0, 'Unauthorized code');
+
+            let broadcastReceived = false;
+
+            client2.on('yjs:update', (payload) => {
+              if (payload.problemId === unauthorizedProblem) {
+                broadcastReceived = true;
+              }
+            });
+
+            client1.on('yjs:error', (payload) => {
+              expect(payload.message).toBe(
+                'Problem is not assigned to this interview'
+              );
+
+              expect(
+                docs.has(`${interviewId}:${unauthorizedProblem}`)
+              ).toBe(false);
+
+              setTimeout(() => {
+                expect(broadcastReceived).toBe(false);
+                done();
+              }, 50);
+            });
+
+            client1.emit('yjs:update', {
+              interviewId,
+              problemId: unauthorizedProblem,
+              update: Array.from(
+                Y.encodeStateAsUpdate(rogueDoc)
+              )
+            });
+          });
         });
       });
     });
@@ -276,62 +465,114 @@ describe('Yjs Real-Time Collaboration', () => {
 
   it('should reject candidate updates when editor is locked', (done) => {
     db.query.mockImplementation((queryStr) => {
-      if (queryStr.includes('JOIN interviews i') || queryStr.includes('role FROM interview_participants')) {
-        return Promise.resolve({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
+      if (queryStr.includes('FROM interview_problems')) {
+        return Promise.resolve({ rows: [{ '?column?': 1 }] });
       }
+
+      if (
+        queryStr.includes('JOIN interviews i') ||
+        queryStr.includes('role FROM interview_participants')
+      ) {
+        return Promise.resolve({
+          rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }]
+        });
+      }
+
       if (queryStr.includes('status FROM interviews')) {
-        return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+        return Promise.resolve({
+          rows: [{ status: 'IN_PROGRESS' }]
+        });
       }
+
       return Promise.resolve({ rows: [] });
     });
 
     const { redisClient } = require('../db/redis');
-    redisClient.set(`interview:${interviewId}:editor:lock`, 'locked').then(() => {
-      setupClient('user-1', (c1) => {
-        client1 = c1;
-        client1.emit('interview:join', { interviewId });
 
-        client1.on('interview:joined', () => {
-          const doc1 = new Y.Doc();
-          doc1.getText('sourceCode').insert(0, 'Code');
-          client1.emit('yjs:update', { interviewId, problemId, update: Array.from(Y.encodeStateAsUpdate(doc1)) });
+    redisClient
+      .set(`interview:${interviewId}:editor:lock`, 'locked')
+      .then(() => {
+        setupClient('user-1', (c1) => {
+          client1 = c1;
 
-          client1.on('yjs:error', (payload) => {
-            expect(payload.message).toBe('Editor is currently locked by interviewer');
-            redisClient.del(`interview:${interviewId}:editor:lock`).then(() => done());
+          client1.emit('interview:join', { interviewId });
+
+          client1.on('interview:joined', () => {
+            const doc1 = new Y.Doc();
+            doc1.getText('sourceCode').insert(0, 'Code');
+
+            client1.on('yjs:error', (payload) => {
+              expect(payload.message).toBe(
+                'Editor is currently locked by interviewer'
+              );
+
+              redisClient
+                .del(`interview:${interviewId}:editor:lock`)
+                .then(() => done());
+            });
+
+            client1.emit('yjs:update', {
+              interviewId,
+              problemId,
+              update: Array.from(Y.encodeStateAsUpdate(doc1))
+            });
           });
         });
       });
-    });
   });
 
   it('should reject candidate updates when interview is completed', (done) => {
     db.query.mockImplementation((queryStr) => {
-      if (queryStr.includes('JOIN interviews i') || queryStr.includes('role FROM interview_participants')) {
-        return Promise.resolve({ rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }] });
+      if (queryStr.includes('FROM interview_problems')) {
+        return Promise.resolve({ rows: [{ '?column?': 1 }] });
       }
+
+      if (
+        queryStr.includes('JOIN interviews i') ||
+        queryStr.includes('role FROM interview_participants')
+      ) {
+        return Promise.resolve({
+          rows: [{ role: 'CANDIDATE', status: 'IN_PROGRESS' }]
+        });
+      }
+
       if (queryStr.includes('status FROM interviews')) {
-        return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });
+        return Promise.resolve({
+          rows: [{ status: 'COMPLETED' }]
+        });
       }
+
       return Promise.resolve({ rows: [] });
     });
 
     const { redisClient } = require('../db/redis');
-    redisClient.del(`interview:${interviewId}:editor:lock`).then(() => {
-      setupClient('user-1', (c1) => {
-        client1 = c1;
-        client1.emit('interview:join', { interviewId });
 
-        client1.on('interview:joined', () => {
-          const doc1 = new Y.Doc();
-          client1.emit('yjs:update', { interviewId, problemId, update: Array.from(Y.encodeStateAsUpdate(doc1)) });
+    redisClient
+      .del(`interview:${interviewId}:editor:lock`)
+      .then(() => {
+        setupClient('user-1', (c1) => {
+          client1 = c1;
 
-          client1.on('yjs:error', (payload) => {
-            expect(payload.message).toBe('Interview is no longer active');
-            done();
+          client1.emit('interview:join', { interviewId });
+
+          client1.on('interview:joined', () => {
+            const doc1 = new Y.Doc();
+
+            client1.on('yjs:error', (payload) => {
+              expect(payload.message).toBe(
+                'Interview is no longer active'
+              );
+
+              done();
+            });
+
+            client1.emit('yjs:update', {
+              interviewId,
+              problemId,
+              update: Array.from(Y.encodeStateAsUpdate(doc1))
+            });
           });
         });
       });
-    });
   });
 });
