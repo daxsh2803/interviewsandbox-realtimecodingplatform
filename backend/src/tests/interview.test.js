@@ -66,6 +66,27 @@ describe('Interview Endpoints', () => {
     });
   });
 
+  describe('GET /api/interviews', () => {
+    it('should return interviews with pagination', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('SELECT COUNT(*)')) {
+          return Promise.resolve({ rows: [{ count: '1' }] });
+        }
+        return Promise.resolve({ rows: [{ id: '1', title: 'Test' }] });
+      });
+
+      const res = await authHeader(
+        request(app).get('/api/interviews?page=2&limit=10')
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.interviews.length).toBe(1);
+      expect(res.body.pagination.page).toBe(2);
+      expect(res.body.pagination.limit).toBe(10);
+      expect(res.body.pagination.total).toBe(1);
+    });
+  });
+
   describe('GET /api/interviews/:id', () => {
     it('should return 403 if unauthorized', async () => {
       db.query.mockResolvedValueOnce({ rows: [] });
@@ -78,19 +99,11 @@ describe('Interview Endpoints', () => {
     });
 
     it('should return interview data if participant', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'CANDIDATE' }]
-        }) // Middleware auth pass
-        .mockResolvedValueOnce({
-          rows: [{ id: '1', title: 'Test' }]
-        }) // Interview fetch
-        .mockResolvedValueOnce({
-          rows: []
-        }) // Participants fetch
-        .mockResolvedValueOnce({
-          rows: []
-        }); // Problems fetch
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'CANDIDATE' }] });
+        if (queryStr.includes('FROM interviews')) return Promise.resolve({ rows: [{ id: '1', title: 'Test' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).get('/api/interviews/1')
@@ -118,19 +131,15 @@ describe('Interview Endpoints', () => {
     });
 
     it('should add participant if user is INTERVIEWER', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // Auth middleware
-        .mockResolvedValueOnce({
-          rows: [{ id: '2' }]
-        }) // User exists
-        .mockResolvedValueOnce({
-          rows: []
-        }) // No existing participant
-        .mockResolvedValueOnce({
-          rows: []
-        }); // Insert
+      db.query.mockImplementation((queryStr, params) => {
+        if (queryStr.includes('FROM interview_participants')) {
+          if (params && params[1] === '2') return Promise.resolve({ rows: [] });
+          return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        }
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+        if (queryStr.includes('FROM users')) return Promise.resolve({ rows: [{ id: '2' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).post('/api/interviews/1/participants')
@@ -159,16 +168,12 @@ describe('Interview Endpoints', () => {
     });
 
     it('should update status if user is INTERVIEWER', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // Middleware
-        .mockResolvedValueOnce({
-          rows: [{ status: 'SCHEDULED' }]
-        }) // Existing status
-        .mockResolvedValueOnce({
-          rows: [{ id: '1', status: 'IN_PROGRESS' }]
-        }); // Update
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('UPDATE interviews SET status')) return Promise.resolve({ rows: [{ id: '1', status: 'IN_PROGRESS' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'SCHEDULED' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).patch('/api/interviews/1/status')
@@ -181,19 +186,12 @@ describe('Interview Endpoints', () => {
     });
 
     it('should allow IN_PROGRESS to COMPLETED', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // Middleware
-        .mockResolvedValueOnce({
-          rows: [{ status: 'IN_PROGRESS' }]
-        }) // Existing status
-        .mockResolvedValueOnce({
-          rows: [{ id: '1', status: 'COMPLETED' }]
-        }) // Update interview
-        .mockResolvedValueOnce({
-          rows: []
-        }); // Assigned problems for snapshots
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('UPDATE interviews SET status')) return Promise.resolve({ rows: [{ id: '1', status: 'COMPLETED' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).patch('/api/interviews/1/status')
@@ -206,13 +204,11 @@ describe('Interview Endpoints', () => {
     });
 
     it('should reject SCHEDULED to COMPLETED', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // Middleware
-        .mockResolvedValueOnce({
-          rows: [{ status: 'SCHEDULED' }]
-        }); // Existing status
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'SCHEDULED' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).patch('/api/interviews/1/status')
@@ -227,13 +223,11 @@ describe('Interview Endpoints', () => {
     });
 
     it('should reject COMPLETED to IN_PROGRESS', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // Middleware
-        .mockResolvedValueOnce({
-          rows: [{ status: 'COMPLETED' }]
-        }); // Existing status
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).patch('/api/interviews/1/status')
@@ -248,13 +242,11 @@ describe('Interview Endpoints', () => {
     });
 
     it('should reject CANCELLED to IN_PROGRESS', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // Middleware
-        .mockResolvedValueOnce({
-          rows: [{ status: 'CANCELLED' }]
-        }); // Existing status
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'CANCELLED' }] });
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).patch('/api/interviews/1/status')
@@ -266,6 +258,93 @@ describe('Interview Endpoints', () => {
       expect(res.body.error).toBe(
         'Invalid status transition from CANCELLED to IN_PROGRESS'
       );
+    });
+  });
+
+  describe('Mutation Lifecycle Restrictions', () => {
+    it('should reject adding a participant to a completed interview', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await authHeader(
+        request(app).post('/api/interviews/1/participants')
+      ).send({ user_id: '2', role: 'CANDIDATE' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Cannot modify a completed or cancelled interview');
+    });
+
+    it('should reject adding a participant to a cancelled interview', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'CANCELLED' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await authHeader(
+        request(app).post('/api/interviews/1/participants')
+      ).send({ user_id: '2', role: 'CANDIDATE' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should reject assigning a problem to a completed interview', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await authHeader(
+        request(app).post('/api/interviews/1/problems')
+      ).send({ problem_id: '1' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should reject assigning a problem to a cancelled interview', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'CANCELLED' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await authHeader(
+        request(app).post('/api/interviews/1/problems')
+      ).send({ problem_id: '1' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should reject removing a problem from a completed interview', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'COMPLETED' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await authHeader(
+        request(app).delete('/api/interviews/1/problems/1')
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should reject removing a problem from a cancelled interview', async () => {
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        if (queryStr.includes('status FROM interviews')) return Promise.resolve({ rows: [{ status: 'CANCELLED' }] });
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await authHeader(
+        request(app).delete('/api/interviews/1/problems/1')
+      );
+
+      expect(res.status).toBe(400);
     });
   });
 });

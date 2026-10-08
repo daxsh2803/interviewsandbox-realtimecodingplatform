@@ -73,9 +73,10 @@ describe('Report and History API', () => {
   });
 
   describe('GET /api/interviews/:id/submissions', () => {
-    it('should filter candidate submissions and hide sensitive data', async () => {
+    it('should filter candidate submissions and hide sensitive data with default pagination', async () => {
       db.query
         .mockResolvedValueOnce({ rowCount: 1, rows: [{ role: 'CANDIDATE' }] }) // Participant check
+        .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '1' }] }) // Count query
         .mockResolvedValueOnce({ rowCount: 1, rows: [
           { id: 'sub-1', problem_id: 'prob-1', language: 'python', status: 'Accepted', created_at: '2026-09-26T00:00:00Z', user_id: 'candidate-1' }
         ] }) // Submissions query
@@ -90,6 +91,9 @@ describe('Report and History API', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.submissions.length).toBe(1);
+      expect(res.body.pagination.page).toBe(1);
+      expect(res.body.pagination.limit).toBe(50);
+      expect(res.body.pagination.total).toBe(1);
 
       const sub = res.body.submissions[0];
       expect(sub.source_code).toBe('print("Hello")');
@@ -104,6 +108,7 @@ describe('Report and History API', () => {
     it('should allow interviewer to see all submissions with full details', async () => {
       db.query
         .mockResolvedValueOnce({ rowCount: 1, rows: [{ role: 'INTERVIEWER' }] }) // Participant check
+        .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '1' }] }) // Count query
         .mockResolvedValueOnce({ rowCount: 1, rows: [
           { id: 'sub-1', problem_id: 'prob-1', language: 'python', status: 'Wrong Answer', created_at: '2026-09-26T00:00:00Z', user_id: 'candidate-1' }
         ] }) // Submissions query
@@ -113,10 +118,12 @@ describe('Report and History API', () => {
         ] }); // Results
 
       const res = await request(app)
-        .get(`/api/interviews/${interviewId}/submissions`)
+        .get(`/api/interviews/${interviewId}/submissions?page=2&limit=5`)
         .set('Cookie', [`auth_token=${interviewerToken}`]);
 
       expect(res.status).toBe(200);
+      expect(res.body.pagination.page).toBe(2);
+      expect(res.body.pagination.limit).toBe(5);
       const sub = res.body.submissions[0];
       const result = sub.results[0];
       expect(result.input).toBe('hidden_in');

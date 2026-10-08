@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
 const routes = require('./routes');
 const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
 const path = require('path');
@@ -8,6 +9,21 @@ const config = require('./config');
 
 const app = express();
 app.set('trust proxy', 1); // Trust the Nginx reverse proxy
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
+      workerSrc: ["'self'", "blob:"],
+      fontSrc: ["'self'", "data:"],
+    },
+  },
+  hsts: config.nodeEnv === 'production',
+}));
 
 app.use(cors({
   origin: process.env.VITE_FRONTEND_URL || 'http://localhost:5173',
@@ -25,9 +41,15 @@ if (config.nodeEnv === 'production') {
   app.use(express.static(frontendDist));
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || !req.accepts('html')) {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/assets/') ||
+      path.extname(req.path) ||
+      !req.accepts('html')
+    ) {
       return next();
     }
+
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
 }

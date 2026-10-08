@@ -40,6 +40,16 @@ describe('Auth Endpoints', () => {
       expect(res.status).toBe(409);
       expect(res.body.error).toBe('User with this email already exists');
     });
+
+    it('should reject registration with password > maximum', async () => {
+      const longPassword = 'a'.repeat(73);
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test', email: 'test@test.com', password: longPassword });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Password exceeds maximum allowed length of 72 characters');
+    });
   });
 
   describe('POST /api/auth/login', () => {
@@ -70,6 +80,84 @@ describe('Auth Endpoints', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.error).toBe('Invalid credentials');
+    });
+
+    it('should reject login with password > maximum', async () => {
+      const longPassword = 'a'.repeat(73);
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'test@test.com', password: longPassword });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Password exceeds maximum allowed length of 72 characters');
+    });
+    it('should return 401 for nonexistent user with same error message', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] }); // User not found
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'nonexistent@test.com', password: 'password123' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Invalid credentials');
+    });
+  });
+
+  describe('GET /api/auth/me (JWT Validation)', () => {
+    const config = require('../config');
+
+    it('should accept a valid HS256 token', async () => {
+      const validToken = jwt.sign({ userId: '1', email: 'test@test.com' }, config.jwtSecret, { algorithm: 'HS256' });
+      db.query.mockResolvedValueOnce({ rows: [{ id: '1', name: 'Test', email: 'test@test.com' }] });
+
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Cookie', `auth_token=${validToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.user).toHaveProperty('email', 'test@test.com');
+    });
+
+    it('should reject a tampered token', async () => {
+      const validToken = jwt.sign({ userId: '1', email: 'test@test.com' }, config.jwtSecret, { algorithm: 'HS256' });
+      const tamperedToken = validToken.slice(0, -5) + 'abcde';
+
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Cookie', `auth_token=${tamperedToken}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Invalid or expired token');
+    });
+
+    it('should reject a token signed with unsupported algorithm', async () => {
+      // Create a token with 'none' algorithm
+      const noneToken = jwt.sign({ userId: '1', email: 'test@test.com' }, config.jwtSecret, { algorithm: 'none' });
+
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Cookie', `auth_token=${noneToken}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Invalid or expired token');
+    });
+
+    it('should reject an expired token', async () => {
+      const expiredToken = jwt.sign({ userId: '1', email: 'test@test.com' }, config.jwtSecret, { algorithm: 'HS256', expiresIn: '-1s' });
+
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Cookie', `auth_token=${expiredToken}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Invalid or expired token');
+    });
+
+    it('should reject missing cookie', async () => {
+      const res = await request(app).get('/api/auth/me');
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Authentication required');
     });
   });
 });

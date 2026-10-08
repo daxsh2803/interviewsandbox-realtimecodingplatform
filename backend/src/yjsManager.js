@@ -1,4 +1,5 @@
 const Y = require('yjs');
+const config = require('./config');
 
 // Map of "interviewId:problemId" -> Y.Doc
 const docs = new Map();
@@ -45,10 +46,35 @@ const cleanupSocketFromDocs = (socketId) => {
         if (!pendingCleanups.has(docId)) {
           const ttl = process.env.YJS_DOC_CLEANUP_TTL_MS || 300000;
 
-          const timer = setTimeout(() => {
+          const timer = setTimeout(async () => {
             const doc = docs.get(docId);
 
             if (doc) {
+              try {
+                const [interviewId] = docId.split(':');
+                const db = require('./db');
+                const statusRes = await db.query(
+                  'SELECT status FROM interviews WHERE id = $1',
+                  [interviewId]
+                );
+
+                if (
+                  statusRes.rows.length > 0 &&
+                  (statusRes.rows[0].status === 'COMPLETED' || statusRes.rows[0].status === 'CANCELLED')
+                ) {
+                  const sourceCode = doc.getText('sourceCode').toString();
+                  if (sourceCode) {
+                    await db.query(
+                      `INSERT INTO interview_snapshots (interview_id, snapshot_content, language, trigger_type)
+                       VALUES ($1, $2, $3, $4)`,
+                      [interviewId, sourceCode, 'javascript', 'TERMINATION']
+                    );
+                  }
+                }
+              } catch (err) {
+                console.error('Failed to persist snapshot during cleanup:', err);
+              }
+
               doc.destroy();
             }
 
@@ -62,6 +88,32 @@ const cleanupSocketFromDocs = (socketId) => {
       }
     }
   }
+};
+
+/**
+ * Check whether a user has exceeded the Yjs update rate limit.
+ *
+ * Uses Redis so the limit works across backend instances.
+ */
+const checkYjsUpdateRateLimit = async (userId, interviewId) => {
+  const { redisClient } = require('./db/redis');
+
+  const windowMs = config.yjsUpdateRateLimit.windowMs;
+  const maxRequests = config.yjsUpdateRateLimit.max;
+
+  const key = `ratelimit:yjs-update:${userId}:${interviewId}`;
+
+  const currentCount = await redisClient.incr(key);
+
+  if (currentCount === 1) {
+    await redisClient.pExpire(key, windowMs);
+  }
+
+  return {
+    allowed: currentCount <= maxRequests,
+    currentCount,
+    maxRequests
+  };
 };
 
 /**
@@ -172,6 +224,46 @@ const registerYjsHandlers = (socket) => {
         });
       }
 
+      if (!update) {
+        return socket.emit('yjs:error', {
+          message: 'Update payload is required'
+        });
+      }
+
+      const updateLength = update.byteLength !== undefined ? update.byteLength : update.length;
+      if (updateLength === undefined || updateLength > 51200) {
+        return socket.emit('yjs:error', {
+          message: 'Update payload exceeds maximum allowed size (50KB) or is invalid'
+        });
+      }
+
+      /*
+       * Rate-limit Yjs updates before performing database/Redis
+       * authorization checks.
+       *
+       * The key is based on authenticated user + interview so
+       * reconnecting with another socket does not bypass the limit.
+       */
+      const userId = socket.data.userId;
+
+      if (!userId) {
+        return socket.emit('yjs:error', {
+          message: 'Unauthorized for this interview document'
+        });
+      }
+
+      const rateLimit = await checkYjsUpdateRateLimit(
+        userId,
+        interviewId
+      );
+
+      if (!rateLimit.allowed) {
+        return socket.emit('yjs:error', {
+          message: 'Too many Yjs updates. Please slow down.',
+          code: 'RATE_LIMITED'
+        });
+      }
+
       // Verify that the problem is actually assigned to this interview
       const db = require('./db');
 
@@ -245,5 +337,6 @@ module.exports = {
   docSockets,
   cleanupSocketFromDocs,
   attachSocketToDoc,
-  pendingCleanups
+  pendingCleanups,
+  checkYjsUpdateRateLimit
 };

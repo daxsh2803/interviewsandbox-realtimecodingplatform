@@ -9,7 +9,7 @@ exports.requireAuth = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret);
+    const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
     req.user = decoded; // Contains userId and email
     next();
   } catch (err) {

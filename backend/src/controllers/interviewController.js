@@ -38,6 +38,11 @@ exports.createInterview = async (req, res, next) => {
 exports.getInterviews = async (req, res, next) => {
   try {
     const userId = req.user.userId;
+    let { page = 1, limit = 50 } = req.query;
+    page = Math.max(1, parseInt(page, 10) || 1);
+    limit = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
+
+    const offset = (page - 1) * limit;
 
     const result = await db.query(`
       SELECT i.*, p.role
@@ -45,9 +50,26 @@ exports.getInterviews = async (req, res, next) => {
       JOIN interview_participants p ON i.id = p.interview_id
       WHERE p.user_id = $1
       ORDER BY i.created_at DESC
-    `, [userId]);
+      LIMIT $2 OFFSET $3
+    `, [userId, limit, offset]);
 
-    res.json({ interviews: result.rows });
+    const countRes = await db.query(`
+      SELECT COUNT(*)
+      FROM interviews i
+      JOIN interview_participants p ON i.id = p.interview_id
+      WHERE p.user_id = $1
+    `, [userId]);
+    const total = parseInt(countRes.rows[0].count, 10);
+
+    res.json({
+      interviews: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -103,6 +125,14 @@ exports.addParticipant = async (req, res, next) => {
       return res.status(400).json({ error: 'Role must be INTERVIEWER or CANDIDATE' });
     }
 
+    const interviewRes = await db.query('SELECT status FROM interviews WHERE id = $1', [id]);
+    if (interviewRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Interview not found' });
+    }
+    if (['COMPLETED', 'CANCELLED'].includes(interviewRes.rows[0].status)) {
+      return res.status(400).json({ error: 'Cannot modify a completed or cancelled interview' });
+    }
+
     const userResult = await db.query('SELECT id FROM users WHERE id = $1', [user_id]);
 
     if (userResult.rows.length === 0) {
@@ -138,6 +168,14 @@ exports.assignProblem = async (req, res, next) => {
       return res.status(400).json({ error: 'problem_id is required' });
     }
 
+    const interviewRes = await db.query('SELECT status FROM interviews WHERE id = $1', [id]);
+    if (interviewRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Interview not found' });
+    }
+    if (['COMPLETED', 'CANCELLED'].includes(interviewRes.rows[0].status)) {
+      return res.status(400).json({ error: 'Cannot modify a completed or cancelled interview' });
+    }
+
     const problemResult = await db.query('SELECT id FROM problems WHERE id = $1', [problem_id]);
 
     if (problemResult.rows.length === 0) {
@@ -167,6 +205,14 @@ exports.assignProblem = async (req, res, next) => {
 exports.removeProblem = async (req, res, next) => {
   try {
     const { id, problemId } = req.params;
+
+    const interviewRes = await db.query('SELECT status FROM interviews WHERE id = $1', [id]);
+    if (interviewRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Interview not found' });
+    }
+    if (['COMPLETED', 'CANCELLED'].includes(interviewRes.rows[0].status)) {
+      return res.status(400).json({ error: 'Cannot modify a completed or cancelled interview' });
+    }
 
     const result = await db.query(
       'DELETE FROM interview_problems WHERE interview_id = $1 AND problem_id = $2 RETURNING *',
@@ -306,6 +352,14 @@ exports.setLock = async (req, res, next) => {
       return res.status(400).json({ error: 'locked must be a boolean' });
     }
 
+    const interviewRes = await db.query('SELECT status FROM interviews WHERE id = $1', [id]);
+    if (interviewRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Interview not found' });
+    }
+    if (['COMPLETED', 'CANCELLED'].includes(interviewRes.rows[0].status)) {
+      return res.status(400).json({ error: 'Cannot modify a completed or cancelled interview' });
+    }
+
     const { redisClient } = require('../db/redis');
     const lockKey = `interview:${id}:editor:lock`;
 
@@ -363,6 +417,14 @@ exports.setActiveProblem = async (req, res, next) => {
 
     if (!problemId) {
       return res.status(400).json({ error: 'problemId is required' });
+    }
+
+    const interviewRes = await db.query('SELECT status FROM interviews WHERE id = $1', [id]);
+    if (interviewRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Interview not found' });
+    }
+    if (['COMPLETED', 'CANCELLED'].includes(interviewRes.rows[0].status)) {
+      return res.status(400).json({ error: 'Cannot modify a completed or cancelled interview' });
     }
 
     // Verify problem belongs to interview

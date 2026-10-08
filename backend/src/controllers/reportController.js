@@ -72,6 +72,11 @@ exports.getSubmissions = async (req, res, next) => {
     }
     const isInterviewer = role === 'INTERVIEWER';
 
+    let { page = 1, limit = 50 } = req.query;
+    page = Math.max(1, parseInt(page, 10) || 1);
+    limit = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
+    const offset = (page - 1) * limit;
+
     let query = `
       SELECT s.id, s.problem_id, s.language, s.status, s.created_at, s.user_id,
              (SELECT COUNT(*) FROM submission_results sr WHERE sr.submission_id = s.id) as total_tests,
@@ -79,16 +84,22 @@ exports.getSubmissions = async (req, res, next) => {
       FROM submissions s
       WHERE s.interview_id = $1
     `;
+
+    let countQuery = `SELECT COUNT(*) FROM submissions s WHERE s.interview_id = $1`;
     const params = [id];
 
     if (!isInterviewer) {
       query += ` AND s.user_id = $2`;
+      countQuery += ` AND s.user_id = $2`;
       params.push(userId);
     }
 
-    query += ` ORDER BY s.created_at DESC`;
+    query += ` ORDER BY s.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
 
-    const submissionsRes = await db.query(query, params);
+    const countRes = await db.query(countQuery, params);
+    const total = parseInt(countRes.rows[0].count, 10);
+
+    const submissionsRes = await db.query(query, [...params, limit, offset]);
 
     // Fetch details including source code and results
     for (let sub of submissionsRes.rows) {
@@ -121,7 +132,15 @@ exports.getSubmissions = async (req, res, next) => {
       }
     }
 
-    res.json({ submissions: submissionsRes.rows });
+    res.json({
+      submissions: submissionsRes.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     next(error);
   }

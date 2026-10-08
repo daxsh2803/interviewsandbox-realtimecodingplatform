@@ -30,7 +30,7 @@ describe('Production Config Validation', () => {
 
       process.env.NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/db';
-      process.env.REDIS_URL = 'redis://localhost:6379';
+      process.env.REDIS_URL = 'rediss://localhost:6379';
       process.env.JWT_SECRET = 'secure_secret_key';
       process.env.JUDGE0_CALLBACK_SECRET = 'secure_callback_secret';
     });
@@ -63,6 +63,19 @@ describe('Production Config Validation', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('CRITICAL'),
         expect.stringContaining('REDIS_URL')
+      );
+    });
+
+    it('should exit if REDIS_URL is not rediss:// in production', () => {
+      process.env.REDIS_URL = 'redis://localhost:6379';
+
+      require('../config');
+
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRITICAL'),
+        expect.stringContaining('REDIS_URL (must use rediss:// in production)')
       );
     });
 

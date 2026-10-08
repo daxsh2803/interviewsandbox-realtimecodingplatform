@@ -135,8 +135,14 @@ describe('Interviewer Control Room Endpoints', () => {
 
   describe('POST /api/interviews/:id/lock', () => {
     it('should allow INTERVIEWER to set lock', async () => {
-      db.query.mockResolvedValueOnce({
-        rows: [{ role: 'INTERVIEWER' }]
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) {
+          return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        }
+        if (queryStr.includes('status FROM interviews')) {
+          return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+        }
+        return Promise.resolve({ rows: [] });
       });
 
       redisClient.set.mockResolvedValue('OK');
@@ -172,13 +178,18 @@ describe('Interviewer Control Room Endpoints', () => {
 
   describe('POST /api/interviews/:id/active-problem', () => {
     it('should allow INTERVIEWER to set active problem', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        }) // middleware
-        .mockResolvedValueOnce({
-          rows: [{ id: 'prob1' }]
-        }); // problem belongs to interview
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) {
+          return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        }
+        if (queryStr.includes('status FROM interviews')) {
+          return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+        }
+        if (queryStr.includes('FROM interview_problems')) {
+          return Promise.resolve({ rows: [{ id: 'prob1' }] });
+        }
+        return Promise.resolve({ rows: [] });
+      });
 
       redisClient.set.mockResolvedValue('OK');
 
@@ -197,13 +208,18 @@ describe('Interviewer Control Room Endpoints', () => {
     });
 
     it('should block setting if problem does not belong to interview', async () => {
-      db.query
-        .mockResolvedValueOnce({
-          rows: [{ role: 'INTERVIEWER' }]
-        })
-        .mockResolvedValueOnce({
-          rows: []
-        }); // problem doesn't belong
+      db.query.mockImplementation((queryStr) => {
+        if (queryStr.includes('FROM interview_participants')) {
+          return Promise.resolve({ rows: [{ role: 'INTERVIEWER' }] });
+        }
+        if (queryStr.includes('status FROM interviews')) {
+          return Promise.resolve({ rows: [{ status: 'IN_PROGRESS' }] });
+        }
+        if (queryStr.includes('FROM interview_problems')) {
+          return Promise.resolve({ rows: [] }); // problem doesn't belong
+        }
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await authHeader(
         request(app).post('/api/interviews/1/active-problem')

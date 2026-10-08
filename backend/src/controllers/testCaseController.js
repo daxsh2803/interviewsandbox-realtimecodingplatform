@@ -51,13 +51,41 @@ exports.createTestCase = async (req, res, next) => {
       return res.status(403).json({ error: 'Not authorized for this operation.' });
     }
 
-    const insertRes = await db.query(
-      `INSERT INTO test_cases (problem_id, input, expected_output, is_hidden) 
-       VALUES ($1, $2, $3, $4) RETURNING id, problem_id, input, expected_output, is_hidden, created_at`,
-      [problemId, input, expectedOutput, isHidden]
-    );
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    return res.status(201).json({ testCase: insertRes.rows[0] });
+      // Verify problem ownership with lock to prevent race conditions
+      const problemRes = await client.query('SELECT created_by FROM problems WHERE id = $1 FOR UPDATE', [problemId]);
+      if (problemRes.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Problem not found.' });
+      }
+      if (problemRes.rows[0].created_by !== userId) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Not authorized for this operation.' });
+      }
+
+      const countRes = await client.query('SELECT COUNT(*) FROM test_cases WHERE problem_id = $1', [problemId]);
+      if (parseInt(countRes.rows[0].count, 10) >= 50) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Maximum number of test cases (50) reached for this problem.' });
+      }
+
+      const insertRes = await client.query(
+        `INSERT INTO test_cases (problem_id, input, expected_output, is_hidden)
+         VALUES ($1, $2, $3, $4) RETURNING id, problem_id, input, expected_output, is_hidden, created_at`,
+        [problemId, input, expectedOutput, isHidden]
+      );
+
+      await client.query('COMMIT');
+      return res.status(201).json({ testCase: insertRes.rows[0] });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      next(error);
+    } finally {
+      client.release();
+    }
   } catch (error) {
     next(error);
   }
@@ -77,6 +105,15 @@ exports.deleteTestCase = async (req, res, next) => {
     );
 
     if (checkRes.rowCount === 0 || checkRes.rows[0].role !== 'INTERVIEWER') {
+      return res.status(403).json({ error: 'Not authorized for this operation.' });
+    }
+
+    // Verify problem ownership
+    const problemRes = await db.query('SELECT created_by FROM problems WHERE id = $1', [problemId]);
+    if (problemRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Problem not found.' });
+    }
+    if (problemRes.rows[0].created_by !== userId) {
       return res.status(403).json({ error: 'Not authorized for this operation.' });
     }
 

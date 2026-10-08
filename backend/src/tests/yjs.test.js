@@ -31,10 +31,26 @@ describe('Yjs Real-Time Collaboration', () => {
   });
 
   afterAll(async () => {
-    await require('../db/redis').closeRedis();
-    io.close();
-    httpServer.close();
+  // Clear any remaining Yjs document cleanup timers.
+  const { pendingCleanups } = require('../yjsManager');
+
+  for (const timer of pendingCleanups.values()) {
+    clearTimeout(timer);
+  }
+
+  pendingCleanups.clear();
+
+  io.close();
+
+  await new Promise((resolve) => {
+    httpServer.close(resolve);
   });
+
+  // Give async Socket.IO disconnect handlers time to finish.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await require('../db/redis').closeRedis();
+});
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -58,10 +74,22 @@ describe('Yjs Real-Time Collaboration', () => {
     });
   });
 
-  afterEach(() => {
-    if (client1 && client1.connected) client1.disconnect();
-    if (client2 && client2.connected) client2.disconnect();
-  });
+  afterEach(async () => {
+  if (client1) {
+    client1.disconnect();
+  }
+
+  if (client2) {
+    client2.disconnect();
+  }
+
+  // Give Socket.IO clients time to close their underlying
+  // connections before the next test starts.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  client1 = null;
+  client2 = null;
+});
 
   const setupClient = (userId, done) => {
     const token = jwt.sign({ userId }, config.jwtSecret);
@@ -277,6 +305,29 @@ describe('Yjs Real-Time Collaboration', () => {
             });
           }, 100);
         }, 50);
+      });
+    });
+  });
+
+  it('should reject Yjs updates with oversized payload', (done) => {
+    setupClient('user-1', (c1) => {
+      client1 = c1;
+      client1.emit('interview:join', { interviewId });
+
+      client1.on('interview:joined', () => {
+        // Create an array larger than 50KB
+        const largeUpdate = new Array(51201).fill(0);
+
+        client1.on('yjs:error', (payload) => {
+          expect(payload.message).toBe('Update payload exceeds maximum allowed size (50KB) or is invalid');
+          done();
+        });
+
+        client1.emit('yjs:update', {
+          interviewId,
+          problemId,
+          update: largeUpdate
+        });
       });
     });
   });
@@ -574,5 +625,58 @@ describe('Yjs Real-Time Collaboration', () => {
           });
         });
       });
+  });
+    it('should rate-limit excessive Yjs updates from the same user', (done) => {
+    const { redisClient } = require('../db/redis');
+
+    const rateLimitKey = `ratelimit:yjs-update:user-1:${interviewId}`;
+
+    redisClient
+      .del(rateLimitKey)
+      .then(() => {
+        setupClient('user-1', (c1) => {
+          client1 = c1;
+
+          client1.emit('interview:join', { interviewId });
+
+          client1.on('interview:joined', () => {
+            const doc = new Y.Doc();
+            doc.getText('sourceCode').insert(0, 'Rate limit test');
+
+            const update = Array.from(Y.encodeStateAsUpdate(doc));
+
+            client1.once('yjs:error', async (payload) => {
+              try {
+                expect(payload.message).toBe(
+                  'Too many Yjs updates. Please slow down.'
+                );
+
+                expect(payload.code).toBe('RATE_LIMITED');
+
+                const rateLimitCount = await redisClient.get(
+                  rateLimitKey
+                );
+
+                expect(Number(rateLimitCount)).toBeGreaterThanOrEqual(61);
+
+                await redisClient.del(rateLimitKey);
+
+                done();
+              } catch (error) {
+                done(error);
+              }
+            });
+
+            for (let i = 0; i < 61; i++) {
+              client1.emit('yjs:update', {
+                interviewId,
+                problemId,
+                update
+              });
+            }
+          });
+        });
+      })
+      .catch(done);
   });
 });

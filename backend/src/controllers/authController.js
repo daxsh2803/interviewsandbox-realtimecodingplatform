@@ -16,6 +16,10 @@ exports.register = async (req, res, next) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    if (password.length > 72) {
+      return res.status(400).json({ error: 'Password exceeds maximum allowed length of 72 characters' });
+    }
+
     const normalizedEmail = normalizeEmail(email);
 
     // Check if user already exists
@@ -48,19 +52,25 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    if (password.length > 72) {
+      return res.status(400).json({ error: 'Password exceeds maximum allowed length of 72 characters' });
+    }
+
     const normalizedEmail = normalizeEmail(email);
 
     // Find user
     const userResult = await db.query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
-    if (userResult.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
 
-    const user = userResult.rows[0];
+    // Constant-time protection against user enumeration
+    const DUMMY_HASH = '$2b$10$ebMN69FnuSwRiwUEzKNLFuriXBz11/yT4ONNm9gCwhE4dyjdfn0Sy';
+    const userExists = userResult.rows.length > 0;
+    const user = userExists ? userResult.rows[0] : null;
+    const hashToCompare = userExists ? user.password_hash : DUMMY_HASH;
 
     // Check password
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) {
+    const isMatch = await bcrypt.compare(password, hashToCompare);
+
+    if (!userExists || !isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
