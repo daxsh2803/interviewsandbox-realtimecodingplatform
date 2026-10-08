@@ -248,4 +248,64 @@ describe('Execution API', () => {
       .send({ problemId: problem.id, language: 'javascript', sourceCode: 'console.log("hello");' });
     expect(user2ResSuccess.status).toBe(202);
   });
+
+  it('should handle callback arriving before submitCode promise resolves (Race Condition)', async () => {
+    let resolveSubmit;
+    const submitPromise = new Promise((resolve) => {
+      resolveSubmit = resolve;
+    });
+    judge0Client.submitCode.mockReturnValueOnce(submitPromise);
+    judge0Client.mapJudge0Status.mockImplementation(id => id === 3 ? 'Accepted' : 'Wrong Answer');
+
+    const raceUserRes = await db.query(
+      "INSERT INTO users (email, password_hash, name) VALUES ('race_exec@test.com', 'hash', 'Race User') RETURNING id, email"
+    );
+    const raceUser = raceUserRes.rows[0];
+    const raceToken = jwt.sign({ userId: raceUser.id, email: raceUser.email }, config.jwtSecret, { expiresIn: '1h' });
+    await db.query(
+      "INSERT INTO interview_participants (interview_id, user_id, role) VALUES ($1, $2, 'CANDIDATE')",
+      [interview.id, raceUser.id]
+    );
+
+    const res = await request(app)
+      .post(`/api/interviews/${interview.id}/execute`)
+      .set('Cookie', `auth_token=${raceToken}`)
+      .send({
+        problemId: problem.id,
+        language: 'javascript',
+        sourceCode: 'console.log("race");'
+      });
+    expect(res.status).toBe(202);
+
+    await new Promise(r => setTimeout(r, 50));
+
+    const dbRows = await db.query('SELECT id FROM code_executions WHERE status = \'Processing\' AND judge0_token IS NULL ORDER BY created_at DESC LIMIT 1');
+    const executionId = dbRows.rows[0].id;
+
+    const callbackRes = await request(app)
+      .put('/api/executions/judge0/callback')
+      .query({ secret: config.judge0.callbackSecret, id: executionId })
+      .send({
+        token: 'race-mock-token',
+        status: { id: 3 },
+        stdout: Buffer.from('race').toString('base64'),
+        time: '0.010',
+        memory: 1024
+      });
+
+    expect(callbackRes.status).toBe(200);
+
+    const dbCheck1 = await db.query('SELECT status, judge0_token FROM code_executions WHERE id = $1', [executionId]);
+    expect(dbCheck1.rows[0].status).toBe('Accepted');
+    expect(dbCheck1.rows[0].judge0_token).toBe('race-mock-token');
+
+    resolveSubmit('race-mock-token');
+
+    // Wait briefly for the then() block to run
+    await new Promise(r => setTimeout(r, 50));
+
+    const dbCheck2 = await db.query('SELECT status, judge0_token FROM code_executions WHERE id = $1', [executionId]);
+    expect(dbCheck2.rows[0].status).toBe('Accepted');
+    expect(dbCheck2.rows[0].judge0_token).toBe('race-mock-token');
+  });
 });

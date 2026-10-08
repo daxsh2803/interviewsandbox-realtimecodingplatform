@@ -161,7 +161,7 @@ exports.submitCode = async (req, res, next) => {
               stdin: tc.input,
               executionId: `subres-${resultId}`,
               callbackUrlOverride: config.judge0.callbackUrl
-                ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&type=submission&base64=true`
+                ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&type=submission&base64=true&id=${resultId}`
                 : undefined
             });
             await db.query(`UPDATE submission_results SET judge0_token = $1 WHERE id = $2`, [token, resultId]);
@@ -207,20 +207,41 @@ exports.submissionCallback = async (req, res, next) => {
     let appStatus = judge0Client.mapJudge0Status(status.id);
     const finalStderr = compile_output ? (stderr ? compile_output + '\\n' + stderr : compile_output) : stderr;
 
-    const updateRes = await db.query(
-      `UPDATE submission_results
-       SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
-       WHERE judge0_token = $6 AND status = 'Processing'
-       RETURNING id, submission_id`,
-      [
-        appStatus,
-        stdout,
-        finalStderr,
-        time ? Math.round(parseFloat(time) * 1000) : null,
-        memory,
-        token
-      ]
-    );
+    let updateRes;
+    const internalId = req.query.id;
+
+    if (internalId) {
+      updateRes = await db.query(
+        `UPDATE submission_results
+         SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5, judge0_token = COALESCE(judge0_token, $6)
+         WHERE id = $7 AND status = 'Processing'
+         RETURNING id, submission_id`,
+        [
+          appStatus,
+          stdout,
+          finalStderr,
+          time ? Math.round(parseFloat(time) * 1000) : null,
+          memory,
+          token,
+          internalId
+        ]
+      );
+    } else {
+      updateRes = await db.query(
+        `UPDATE submission_results
+         SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
+         WHERE judge0_token = $6 AND status = 'Processing'
+         RETURNING id, submission_id`,
+        [
+          appStatus,
+          stdout,
+          finalStderr,
+          time ? Math.round(parseFloat(time) * 1000) : null,
+          memory,
+          token
+        ]
+      );
+    }
 
     if (updateRes.rowCount > 0) {
       const { submission_id } = updateRes.rows[0];

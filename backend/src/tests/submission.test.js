@@ -62,8 +62,9 @@ describe('Submission API', () => {
     await require('../db/redis').closeRedis();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.clearAllMocks();
+    await db.query('DELETE FROM test_cases WHERE problem_id = $1 AND id != $2', [problem.id, testCase.id]);
   });
 
   it('should submit code for evaluation', async () => {
@@ -329,5 +330,71 @@ expect(dbSubRes.rows[0].status).toBe('Wrong Answer'); // Changed from Accepted
     // Verify B
     const finalB = await db.query('SELECT status FROM submissions WHERE id = $1', [subBId]);
     expect(finalB.rows[0].status).toBe('Accepted');
+  });
+
+  it('should handle callback arriving before submitCode promise resolves (Race Condition)', async () => {
+    let resolveSubmit;
+    const submitPromise = new Promise((resolve) => {
+      resolveSubmit = resolve;
+    });
+    judge0Client.submitCode.mockReturnValueOnce(submitPromise);
+    judge0Client.mapJudge0Status.mockImplementation(id => id === 3 ? 'Accepted' : 'Wrong Answer');
+
+
+    const raceUserRes = await db.query(
+      "INSERT INTO users (email, password_hash, name) VALUES ('race_sub@test.com', 'hash', 'Race User') RETURNING id, email"
+    );
+    const raceUser = raceUserRes.rows[0];
+    const raceToken = jwt.sign({ userId: raceUser.id, email: raceUser.email }, config.jwtSecret, { expiresIn: '1h' });
+    await db.query(
+      "INSERT INTO interview_participants (interview_id, user_id, role) VALUES ($1, $2, 'CANDIDATE')",
+      [interview.id, raceUser.id]
+    );
+
+    const res = await request(app)
+      .post(`/api/interviews/${interview.id}/problems/${problem.id}/submit`)
+      .set('Cookie', `auth_token=${raceToken}`)
+      .send({
+        language: 'javascript',
+        sourceCode: 'console.log("out");'
+      });
+    expect(res.status).toBe(202);
+
+    await new Promise(r => setTimeout(r, 50));
+
+    const subRows = await db.query('SELECT id FROM submissions WHERE status = \'Processing\' ORDER BY created_at DESC LIMIT 1');
+    const submissionId = subRows.rows[0].id;
+
+    const resRows = await db.query('SELECT id FROM submission_results WHERE submission_id = $1 AND judge0_token IS NULL', [submissionId]);
+    const resultId = resRows.rows[0].id;
+
+    const callbackRes = await request(app)
+      .put('/api/executions/judge0/callback')
+      .query({ secret: config.judge0.callbackSecret, type: 'submission', base64: 'true', id: resultId })
+      .send({
+        token: 'race-sub-token',
+        status: { id: 3 },
+        stdout: Buffer.from('out\n').toString('base64'),
+        time: '0.010',
+        memory: 1024
+      });
+
+    expect(callbackRes.status).toBe(200);
+
+    const dbCheck1 = await db.query('SELECT status, judge0_token FROM submission_results WHERE id = $1', [resultId]);
+    expect(dbCheck1.rows[0].status).toBe('Accepted');
+    expect(dbCheck1.rows[0].judge0_token).toBe('race-sub-token');
+
+    resolveSubmit('race-sub-token');
+
+    // Wait for the background loop to finish evaluateTestCases
+    await new Promise(r => setTimeout(r, 50));
+
+    const dbCheck2 = await db.query('SELECT status, judge0_token FROM submission_results WHERE id = $1', [resultId]);
+    expect(dbCheck2.rows[0].status).toBe('Accepted');
+    expect(dbCheck2.rows[0].judge0_token).toBe('race-sub-token');
+
+    const subFinal = await db.query('SELECT status FROM submissions WHERE id = $1', [submissionId]);
+    expect(subFinal.rows[0].status).toBe('Accepted');
   });
 });

@@ -55,7 +55,7 @@ exports.executeCode = async (req, res, next) => {
       stdin,
       executionId,
       callbackUrlOverride: config.judge0.callbackUrl
-        ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&base64=true`
+        ? `${config.judge0.callbackUrl}?secret=${encodeURIComponent(config.judge0.callbackSecret)}&base64=true&id=${executionId}`
         : undefined
     })
       .then(async (token) => {
@@ -125,20 +125,40 @@ exports.judge0Callback = async (req, res, next) => {
     const finalStderr = compile_output ? (stderr ? compile_output + '\\n' + stderr : compile_output) : stderr;
 
     // Idempotent update: only update if status is currently 'Processing' or similar
-    const updateRes = await db.query(
-      `UPDATE code_executions 
-       SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
-       WHERE judge0_token = $6 AND status = 'Processing'
-       RETURNING id, interview_id`,
-      [
-        appStatus,
-        stdout,
-        finalStderr,
-        time ? Math.round(parseFloat(time) * 1000) : null,
-        memory,
-        token
-      ]
-    );
+    let updateRes;
+    const internalId = req.query.id;
+    if (internalId) {
+      updateRes = await db.query(
+        `UPDATE code_executions
+         SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5, judge0_token = COALESCE(judge0_token, $6)
+         WHERE id = $7 AND status = 'Processing'
+         RETURNING id, interview_id`,
+        [
+          appStatus,
+          stdout,
+          finalStderr,
+          time ? Math.round(parseFloat(time) * 1000) : null,
+          memory,
+          token,
+          internalId
+        ]
+      );
+    } else {
+      updateRes = await db.query(
+        `UPDATE code_executions
+         SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
+         WHERE judge0_token = $6 AND status = 'Processing'
+         RETURNING id, interview_id`,
+        [
+          appStatus,
+          stdout,
+          finalStderr,
+          time ? Math.round(parseFloat(time) * 1000) : null,
+          memory,
+          token
+        ]
+      );
+    }
 
     if (updateRes.rowCount > 0) {
       const { id, interview_id } = updateRes.rows[0];
