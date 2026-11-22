@@ -259,3 +259,5 @@ exports.submissionCallback = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.evaluateTestCases = evaluateTestCases;

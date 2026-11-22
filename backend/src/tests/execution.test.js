@@ -308,4 +308,32 @@ describe('Execution API', () => {
     expect(dbCheck2.rows[0].status).toBe('Accepted');
     expect(dbCheck2.rows[0].judge0_token).toBe('race-mock-token');
   });
+
+  it('should accept a webhook payload near the configured limit and reject an oversized one', async () => {
+    // 2. Send callback payload near the 5mb limit (4MB string)
+    const nearLimitSize = 4 * 1024 * 1024; // 4MB
+    const largeStr = 'a'.repeat(nearLimitSize);
+    const resNear = await request(app)
+      .put('/api/executions/judge0/callback')
+      .set('x-judge0-callback-secret', config.judge0.callbackSecret)
+      .send({
+        token: 'mock-token',
+        status: { id: 3 },
+        stdout: largeStr
+      });
+    expect(resNear.status).toBe(200);
+
+    // 3. Send oversized callback (6MB string, limit is 5MB)
+    const overLimitSize = 6 * 1024 * 1024; // 6MB
+    const tooLargeStr = 'b'.repeat(overLimitSize);
+    const resOver = await request(app)
+      .put('/api/executions/judge0/callback')
+      .set('x-judge0-callback-secret', config.judge0.callbackSecret)
+      .send({
+        token: 'mock-token',
+        status: { id: 3 },
+        stdout: tooLargeStr
+      });
+    expect(resOver.status).toBe(413); // Payload Too Large
+  });
 });

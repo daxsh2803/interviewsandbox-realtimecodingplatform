@@ -29,6 +29,9 @@ app.use(cors({
   origin: process.env.VITE_FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }));
+// P1 #1 Fix: Route-specific larger JSON body limit for Judge0 webhooks
+app.use('/api/executions/judge0/callback', express.json({ limit: config.judge0.webhookPayloadLimit }));
+
 app.use(express.json());
 app.use(cookieParser());
 

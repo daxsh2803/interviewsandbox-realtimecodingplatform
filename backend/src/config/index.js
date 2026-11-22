@@ -23,6 +23,13 @@ module.exports = {
     wallTimeLimit: parseFloat(process.env.JUDGE0_WALL_TIME_LIMIT) || 5.0,
     memoryLimit:
       parseInt(process.env.JUDGE0_MEMORY_LIMIT, 10) || 128000,
+    webhookPayloadLimit: process.env.JUDGE0_WEBHOOK_PAYLOAD_LIMIT || '5mb',
+  },
+
+  reconciliation: {
+    enabled: process.env.RECONCILIATION_ENABLED !== 'false',
+    intervalMs: parseInt(process.env.RECONCILIATION_INTERVAL_MS, 10) || 60000,
+    staleThresholdMs: parseInt(process.env.RECONCILIATION_STALE_THRESHOLD_MS, 10) || 120000,
   },
 
   authRateLimit: {

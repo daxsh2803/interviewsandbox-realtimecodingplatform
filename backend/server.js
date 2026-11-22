@@ -4,6 +4,7 @@ const config = require('./src/config');
 const { initSocket, getSocketIo } = require('./src/socket');
 const db = require('./src/db');
 const { closeRedis } = require('./src/db/redis');
+const reconciliationWorker = require('./src/services/reconciliationWorker');
 
 const server = http.createServer(app);
 
@@ -12,6 +13,7 @@ initSocket(server);
 
 server.listen(config.port, () => {
   console.log(`Server is running on port ${config.port} in ${config.nodeEnv} mode`);
+  reconciliationWorker.start();
 });
 
 let isShuttingDown = false;
@@ -20,6 +22,8 @@ const gracefulShutdown = async (signal) => {
   if (isShuttingDown) return;
   isShuttingDown = true;
   console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
+
+  reconciliationWorker.stop();
 
   const forceExitTimeout = setTimeout(() => {
     console.error('Graceful shutdown timed out (10s). Forcing exit.');

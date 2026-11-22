@@ -7,17 +7,19 @@ const notFoundHandler = (req, res, next) => {
 const globalErrorHandler = (err, req, res, next) => {
   console.error(err.stack);
   
+  const status = err.status || err.statusCode || 500;
+
   // Do not leak stack traces or internal DB errors in production
   const response = {
-    error: 'Internal Server Error'
+    error: status === 500 ? 'Internal Server Error' : err.message
   };
   
-  if (config.nodeEnv !== 'production') {
+  if (config.nodeEnv !== 'production' && status === 500) {
     response.message = err.message;
     response.stack = err.stack;
   }
 
-  res.status(500).json(response);
+  res.status(status).json(response);
 };
 
 module.exports = {
