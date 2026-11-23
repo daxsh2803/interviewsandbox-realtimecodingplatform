@@ -8,21 +8,52 @@ export const Dashboard = () => {
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
   const navigate = useNavigate();
 
+  const fetchInterviews = async () => {
+    try {
+      const data = await interviewApi.getInterviews();
+      setInterviews(data.interviews || []);
+    } catch (err) {
+      setError(err.message || 'Failed to load interviews');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchInterviews = async () => {
-      try {
-        const data = await interviewApi.getInterviews();
-        setInterviews(data.interviews || []);
-      } catch (err) {
-        setError(err.message || 'Failed to load interviews');
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchInterviews();
   }, []);
+
+  const handleCreateInterview = async (e) => {
+    e.preventDefault();
+    if (!newTitle.trim()) {
+      setCreateError('Interview title is required');
+      return;
+    }
+
+    setCreating(true);
+    setCreateError(null);
+
+    try {
+      const data = await interviewApi.createInterview({ title: newTitle.trim() });
+      setShowCreateModal(false);
+      setNewTitle('');
+      if (data?.interview?.id) {
+        navigate(`/interviews/${data.interview.id}`);
+      } else {
+        await fetchInterviews();
+      }
+    } catch (err) {
+      setCreateError(err.message || 'Failed to create interview');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="container page-enter">
@@ -42,7 +73,16 @@ export const Dashboard = () => {
           </div>
         </div>
 
-        <h2 style={{ marginBottom: '1rem' }}>My Interviews</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <h2 style={{ margin: 0 }}>My Interviews</h2>
+          <button
+            className="btn btn-primary"
+            style={{ width: 'auto', padding: '0.6rem 1.25rem' }}
+            onClick={() => { setShowCreateModal(true); setCreateError(null); }}
+          >
+            + Create Interview
+          </button>
+        </div>
         {error && <div className="alert alert-error">{error}</div>}
 
         {loading ? (
@@ -52,7 +92,14 @@ export const Dashboard = () => {
           </div>
         ) : interviews.length === 0 ? (
           <div className="glass-card" style={{ maxWidth: '100%', textAlign: 'center', padding: '3rem' }}>
-            <p style={{ margin: 0 }}>You don't have any interviews scheduled yet.</p>
+            <p style={{ marginBottom: '1.5rem' }}>You don't have any interviews scheduled yet.</p>
+            <button
+              className="btn btn-primary"
+              style={{ width: 'auto', margin: '0 auto' }}
+              onClick={() => { setShowCreateModal(true); setCreateError(null); }}
+            >
+              + Create Your First Interview
+            </button>
           </div>
         ) : (
           <div className="interview-grid">
@@ -80,6 +127,88 @@ export const Dashboard = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {showCreateModal && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              padding: '1rem'
+            }}
+            onClick={(e) => { if (e.target === e.currentTarget) setShowCreateModal(false); }}
+          >
+            <div className="glass-card" style={{ width: '100%', maxWidth: '480px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.4rem' }}>Create New Interview</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    lineHeight: 1
+                  }}
+                >
+                  &times;
+                </button>
+              </div>
+
+              {createError && <div className="alert alert-error">{createError}</div>}
+
+              <form onSubmit={handleCreateInterview}>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="interview-title">Interview Title</label>
+                  <input
+                    id="interview-title"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Senior Frontend Technical Interview"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    disabled={creating}
+                    autoFocus
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setShowCreateModal(false)}
+                    disabled={creating}
+                    style={{
+                      width: '50%',
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      color: 'var(--text-main)'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={creating || !newTitle.trim()}
+                    style={{ width: '50%' }}
+                  >
+                    {creating ? 'Creating...' : 'Create'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>

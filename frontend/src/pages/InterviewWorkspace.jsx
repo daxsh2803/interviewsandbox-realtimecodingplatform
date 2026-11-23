@@ -176,6 +176,18 @@ export const InterviewWorkspace = () => {
     }
   };
 
+  const handleProblemAssigned = async (assignedProblemId) => {
+    try {
+      const data = await interviewApi.getInterviewById(id);
+      if (data?.interview) {
+        setInterview(data.interview);
+        setActiveProblemId(assignedProblemId);
+      }
+    } catch (err) {
+      console.error('Failed to reload interview after problem assignment:', err);
+    }
+  };
+
   const toggleLock = async () => {
     try {
       await interviewApi.setLock(id, !editorLocked);
@@ -262,6 +274,8 @@ export const InterviewWorkspace = () => {
             activeProblemId={activeProblemId}
             onProblemChange={handleProblemChange}
             isInterviewer={userRole === 'INTERVIEWER'}
+            interviewId={id}
+            onProblemAssigned={handleProblemAssigned}
           />
         </div>
         

@@ -1,12 +1,26 @@
 import { apiClient } from './client';
 
 export const interviewApi = {
+  createInterview: async (data) => {
+    return apiClient('/interviews', {
+      method: 'POST',
+      body: data
+    });
+  },
+
   getInterviews: async () => {
     return apiClient('/interviews');
   },
 
   getInterviewById: async (id) => {
     return apiClient(`/interviews/${id}`);
+  },
+
+  assignProblem: async (interviewId, problemId) => {
+    return apiClient(`/interviews/${interviewId}/problems`, {
+      method: 'POST',
+      body: { problem_id: problemId }
+    });
   },
 
   updateStatus: async (id, status) => {
