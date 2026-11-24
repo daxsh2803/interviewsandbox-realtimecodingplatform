@@ -2,6 +2,17 @@ require('dotenv').config({
   path: require('path').resolve(__dirname, '../../../.env')
 });
 
+const parseTrustProxy = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return 1;
+  }
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  const num = Number(value);
+  if (!isNaN(num)) return num;
+  return value;
+};
+
 module.exports = {
   port: process.env.PORT || 5000,
   databaseUrl: process.env.DATABASE_URL,
@@ -9,6 +20,7 @@ module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret:
     process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod',
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 
   judge0: {
     baseUrl: process.env.JUDGE0_BASE_URL || 'http://localhost:2358',

@@ -142,9 +142,10 @@ We use Docker Compose to run the entire application stack locally (Frontend, Bac
 - **Judge0 Webhooks**: If you are using a public Judge0 instance (e.g., the public API), it will not be able to reach your `localhost` backend to deliver execution webhooks. To test Judge0 execution locally, either self-host Judge0 on the same Docker network or use a tunneling service (like ngrok) and update `JUDGE0_CALLBACK_URL` in `.env`.
 - **Graceful Shutdown**: The backend server is configured to handle `SIGINT` and `SIGTERM` signals for graceful shutdown. It stops accepting new HTTP connections, cleanly disconnects Socket.io clients, and ends PostgreSQL and Redis connections with a 10s timeout to prevent hanging.
 - **Rate Limiting**:
-  - **Auth Routes (`/register`, `/login`)**: Protected by an in-memory IP-based rate limiter (default: 10 reqs / 15 mins). Limitation: Limits do not sync across instances (if scaled horizontally) and are reset on process restart.
-  - **Execution Routes (`/execute`, `/submit`)**: Protected by a Redis-based rate limiter per authenticated user (default: 5 reqs / 10 secs).
-  - Rate limits can be configured via environment variables (`AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `EXEC_RATE_LIMIT_WINDOW_MS`, `EXEC_RATE_LIMIT_MAX`).
+  - **Auth Routes (`/register`, `/login`)**: Protected by a Redis-backed distributed IP-based rate limiter (`ratelimit:auth:${ip}`) (default: 10 reqs / 15 mins). Limits sync across horizontally scaled backend instances and persist across process restarts. Sets standard rate-limit headers (`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After`).
+  - **Execution Routes (`/execute`, `/submit`)**: Protected by a Redis-based rate limiter per authenticated user (`ratelimit:execute:${userId}`) (default: 5 reqs / 10 secs).
+  - **Reverse Proxy Client IP Resolution (`TRUST_PROXY`)**: Express `trust proxy` setting is configurable via `TRUST_PROXY` (defaulting to `1` for single-hop reverse proxies like Nginx and AWS ALB), ensuring `req.ip` reflects the real client IP.
+  - Rate limits can be configured via environment variables (`AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `EXEC_RATE_LIMIT_WINDOW_MS`, `EXEC_RATE_LIMIT_MAX`, `TRUST_PROXY`).
 - **Production Configuration Validation**: If `NODE_ENV=production`, the application will immediately crash on startup if critical environment variables (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`) are missing or using insecure fallback defaults.
 
 ## AWS EC2 Production Deployment
@@ -196,17 +197,37 @@ docker compose -f docker-compose.prod.yml exec backend npm run migrate
 ```
 *(This command safely applies pending SQL files from `src/db/migrations` using a migrations tracking table. It is safe to run multiple times and prevents duplicate execution.)*
 
-### 5. HTTPS / SSL Limitation
+### 5. Production HTTPS / SSL Deployment (Let's Encrypt & Certbot)
 
-The current deployment exposes the application over HTTP on port 80. HTTP traffic is not encrypted in transit. This is a significant security limitation, especially concerning the transmission of authentication cookies, user sessions, and private code.
+Production deployments use `docker-compose.prod.yml` and `nginx/nginx.prod.conf` for TLS 1.2/1.3 termination, automatic HTTP-to-HTTPS redirection, security headers, and automated Let's Encrypt certificate renewal via Certbot.
 
-**This deployment must not be described as fully production-ready or used for real users until HTTPS is configured.**
+#### Ingress & Security Architecture:
+- **Port 80 (HTTP)**: Handles the Let's Encrypt ACME challenge path (`/.well-known/acme-challenge/`) for certificate issuance and renewal; returns a `301 Moved Permanently` redirect to HTTPS for all other traffic.
+- **Port 443 (HTTPS)**: Terminates TLS 1.2/1.3 with secure cipher suites, sets HSTS (`Strict-Transport-Security`), `X-Content-Type-Options: nosniff`, and `X-Frame-Options: SAMEORIGIN`, proxies `/api/` and `/socket.io/` to the backend container with WebSocket upgrades (`Upgrade: websocket`, `Connection: upgrade`, `X-Forwarded-*`), and serves the SPA frontend.
+- **Automated Certificate Renewal**: A dedicated `certbot` container runs a renewal daemon checking every 12 hours (`certbot renew`) against shared Docker volumes (`certbot_etc`, `certbot_var`, `certbot_www`).
 
-HTTPS can be added later using a suitable approach, such as:
-- A custom domain with Let's Encrypt and Certbot running alongside Nginx.
-- An AWS Application Load Balancer (ALB) with TLS termination configured in front of the EC2 instance.
+#### Step-by-Step Initial SSL Certificate Setup:
+1. Ensure your domain's DNS A-record points to your EC2 instance's public IP address.
+2. Request the initial certificate using Certbot in standalone mode on port 80 **before starting the frontend container** (ensure port 80 is free):
+   ```bash
+   docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot -p 80:80 certbot certonly --standalone \
+     --cert-name interview-sandbox \
+     --email your-email@example.com \
+     --agree-tos --no-eff-email \
+     -d yourdomain.com -d www.yourdomain.com
+   ```
+   *(Note: Passing `--cert-name interview-sandbox` guarantees the certificate is generated under `/etc/letsencrypt/live/interview-sandbox/`, directly matching the paths pre-configured in `nginx/nginx.prod.conf`.)*
 
-Until HTTPS is properly configured, this deployment should be treated strictly as a temporary demonstration environment.
+3. Build and start the full production stack:
+   ```bash
+   docker compose -f docker-compose.prod.yml up --build -d
+   ```
+
+4. Certificate Renewals & Nginx Reload:
+   The `certbot` container continuously checks and renews certificates every 12 hours via the shared ACME challenge webroot (`certbot_www`). After a renewal occurs, reload Nginx with zero downtime:
+   ```bash
+   docker compose -f docker-compose.prod.yml exec frontend nginx -s reload
+   ```
 
 ## Continuous Integration (CI)
 GitHub Actions is configured to run automated CI checks:

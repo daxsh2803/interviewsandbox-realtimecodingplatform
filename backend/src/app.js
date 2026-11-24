@@ -8,7 +8,7 @@ const path = require('path');
 const config = require('./config');
 
 const app = express();
-app.set('trust proxy', 1); // Trust the Nginx reverse proxy
+app.set('trust proxy', config.trustProxy);
 
 app.use(helmet({
   contentSecurityPolicy: {

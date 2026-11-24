@@ -10,8 +10,17 @@ jest.mock('../db', () => ({
 }));
 
 describe('Auth Endpoints', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    try {
+      const { redisClient } = require('../db/redis');
+      if (redisClient && redisClient.isOpen) {
+        const keys = await redisClient.keys('ratelimit:auth:*');
+        if (keys.length > 0) {
+          await redisClient.del(keys);
+        }
+      }
+    } catch (e) {}
   });
 
   describe('POST /api/auth/register', () => {
@@ -163,4 +172,15 @@ describe('Auth Endpoints', () => {
 });
 
 
-afterAll(async () => { await require('../db/redis').closeRedis(); });
+afterAll(async () => {
+  try {
+    const { redisClient, closeRedis } = require('../db/redis');
+    if (redisClient && redisClient.isOpen) {
+      const keys = await redisClient.keys('ratelimit:auth:*');
+      if (keys.length > 0) {
+        await redisClient.del(keys);
+      }
+    }
+    await closeRedis();
+  } catch (e) {}
+});
