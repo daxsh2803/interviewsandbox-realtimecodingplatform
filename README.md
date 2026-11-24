@@ -88,7 +88,9 @@ The frontend is built with React, Vite, and React Router, featuring a custom van
 - **Role-based Authorization** is implemented via middleware to restrict access based on user roles within specific interviews (`interview_participants` table), rather than global user roles.
 
 ### Environment Variables
-The `.env` file requires the following authentication variable:
+The `.env` file requires the following variables:
+- `DATABASE_URL`: Primary PostgreSQL connection string for development and production (e.g., `postgresql://postgres:postgres@localhost:5433/interview_db`).
+- `TEST_DATABASE_URL`: Dedicated PostgreSQL connection string for automated tests (e.g., `postgresql://postgres:postgres@localhost:5433/interview_sandbox_test`). Isolates Jest integration tests so development data and seeded problems are preserved across test runs.
 - `JWT_SECRET`: Secret used to sign JSON Web Tokens. Must be kept secure and configured per environment.
 
 ## Development Prerequisites
@@ -236,6 +238,12 @@ GitHub Actions is configured to run automated CI checks:
 - Validates the current project foundation: verifies clean dependency installation (`npm ci`), verifies backend source code validity, and compiles the frontend production build.
 - A failed CI workflow indicates an issue in the foundation that must be resolved before merging.
 - The workflow automatically runs the backend test suite using Jest to ensure code correctness and prevent regressions.
+
+### Automated Testing & Test Database Isolation
+Backend integration tests run against a dedicated, isolated test database (`interview_sandbox_test`) configured via `TEST_DATABASE_URL`:
+- **Run Tests**: `npm --prefix backend test` (automatically initializes and runs migrations against `interview_sandbox_test` if missing, then executes Jest).
+- **Manual Setup**: `npm --prefix backend run db:test:setup` (creates `interview_sandbox_test` and applies pending migrations).
+- **CI Compatibility**: In CI environments where only `DATABASE_URL` is set, tests safely fall back to `DATABASE_URL`.
 
 ## Architecture Documentation
 Detailed system architecture and technical design specifications are available in [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).

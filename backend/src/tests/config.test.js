@@ -20,6 +20,42 @@ describe('Production Config Validation', () => {
     }).not.toThrow();
   });
 
+  describe('test database configuration', () => {
+    it('should use TEST_DATABASE_URL when NODE_ENV is test', () => {
+      process.env.NODE_ENV = 'test';
+      process.env.TEST_DATABASE_URL = 'postgresql://localhost:5433/interview_sandbox_test';
+      process.env.DATABASE_URL = 'postgresql://localhost:5433/interview_db';
+
+      const config = require('../config');
+      expect(config.databaseUrl).toBe('postgresql://localhost:5433/interview_sandbox_test');
+    });
+
+    it('should fall back to DATABASE_URL in CI when TEST_DATABASE_URL is unset', () => {
+      process.env.NODE_ENV = 'test';
+      delete process.env.TEST_DATABASE_URL;
+      process.env.CI = 'true';
+      process.env.DATABASE_URL = 'postgresql://localhost:5433/interview_db';
+
+      const config = require('../config');
+      expect(config.databaseUrl).toBe('postgresql://localhost:5433/interview_db');
+    });
+
+    it('should warn when running tests against a non-test database without TEST_DATABASE_URL outside CI', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.NODE_ENV = 'test';
+      delete process.env.TEST_DATABASE_URL;
+      delete process.env.CI;
+      process.env.DATABASE_URL = 'postgresql://localhost:5433/interview_db';
+
+      const config = require('../config');
+      expect(config.databaseUrl).toBe('postgresql://localhost:5433/interview_db');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('WARNING: Running tests against non-test database')
+      );
+      warnSpy.mockRestore();
+    });
+  });
+
   describe('production validation', () => {
     let exitSpy;
     let errorSpy;

@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { pool } = require('./index'); // Uses the existing pool
 
-async function runMigrations() {
-  const client = await pool.connect();
+async function runMigrations(targetPool = pool) {
+  const client = await targetPool.connect();
   try {
     // 1. Ensure migrations table exists
     await client.query(`
@@ -45,12 +45,18 @@ async function runMigrations() {
     console.log('All migrations applied successfully.');
   } catch (error) {
     console.error('Migration failed:', error);
-    process.exit(1);
+    throw error;
   } finally {
     client.release();
-    // Close the pool so the process can exit
-    await pool.end();
+    // Only close pool if running directly as CLI script with default pool
+    if (targetPool === pool && require.main === module) {
+      await pool.end();
+    }
   }
 }
 
-runMigrations();
+if (require.main === module) {
+  runMigrations().catch(() => process.exit(1));
+}
+
+module.exports = { runMigrations };

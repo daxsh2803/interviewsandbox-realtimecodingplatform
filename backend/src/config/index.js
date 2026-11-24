@@ -13,9 +13,31 @@ const parseTrustProxy = (value) => {
   return value;
 };
 
+const getDatabaseUrl = () => {
+  if (process.env.NODE_ENV === 'test') {
+    if (process.env.TEST_DATABASE_URL) {
+      return process.env.TEST_DATABASE_URL;
+    }
+    // Safe fallback in CI where only DATABASE_URL is configured
+    if (process.env.CI) {
+      return process.env.DATABASE_URL;
+    }
+    // Safety guard / clear warning if pointing at non-test DB locally
+    const dbUrl = process.env.DATABASE_URL || '';
+    if (dbUrl && !dbUrl.includes('test')) {
+      console.warn(
+        '⚠️  WARNING: Running tests against non-test database! Set TEST_DATABASE_URL to avoid wiping development data.'
+      );
+    }
+    return process.env.DATABASE_URL;
+  }
+  return process.env.DATABASE_URL;
+};
+
 module.exports = {
   port: process.env.PORT || 5000,
-  databaseUrl: process.env.DATABASE_URL,
+  databaseUrl: getDatabaseUrl(),
+  testDatabaseUrl: process.env.TEST_DATABASE_URL || null,
   redisUrl: process.env.REDIS_URL,
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret:
