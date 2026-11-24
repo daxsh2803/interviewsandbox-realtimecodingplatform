@@ -24,14 +24,13 @@ The platform has a functional PostgreSQL database schema, secure authentication,
 - **PostgreSQL**: Persistent domain state (authoritative truth for domain models, auth, and problem metadata).
 - **Yjs**: Live collaborative document state (in-memory, synchronized across clients).
 - **Socket.io**: Real-time transport (WebSockets + polling fallback).
-- **Redis**: Ephemeral distributed coordination + Socket.io adapter (used for multi-instance pub/sub and distributed presence tracking).
+- **Redis**: Ephemeral distributed coordination, Socket.io adapter, distributed presence tracking, and distributed Yjs document state persistence & cross-instance Pub/Sub synchronization.
 
-*Note: Redis does NOT persist Yjs source code or collaborative document contents. Yjs documents remain process-local.*
-
-### Phase 9 Known Limitations & Deployment Requirements
-- **Multi-Instance Yjs Limitation**: Because Yjs state remains process-local (in-memory Map) and is not persisted in Redis, instances do not automatically share Y.Doc state. 
-- **Sticky-Session Requirement**: Due to the above limitation, multi-instance deployments require load balancer session affinity (sticky sessions) keyed by `interviewId` to ensure all participants of a specific interview converge on the same backend process.
-- **Redis Presence Orphan Limitation**: In the event of an ungraceful backend crash, Socket.io disconnect handlers will not fire, potentially leaving orphaned presence increments in Redis. This limitation is accepted for Phase 9 as the state is ephemeral and resets organically.
+### Distributed Yjs Architecture & Scalability
+- **Redis State Persistence & Hydration**: Yjs document updates are persisted as an append-only list in Redis (`yjs:updates:${interviewId}:${problemId}`) with an extensible TTL. When any backend instance loads a document that is not present in its local memory, it transparently hydrates state from Redis before computing sync steps for clients. Concurrent hydration requests are deduplicated in-flight.
+- **Cross-Instance Real-Time Convergence**: Local Yjs updates are published to Redis Pub/Sub (`yjs:sync:updates`) tagged with the originating `instanceId`. Peer instances apply remote updates using a dedicated transaction origin (`redis-pubsub`) to guarantee real-time CRDT convergence across instances without echo loops or redundant re-publishing.
+- **Elimination of Sticky-Session Requirement**: Multi-instance deployments no longer require load balancer session affinity (sticky sessions) for collaborative editing. Participants connected to different backend instances seamlessly collaborate and converge to the exact same document state.
+- **Redis Presence Orphan Limitation**: In the event of an ungraceful backend crash, Socket.io disconnect handlers will not fire, potentially leaving orphaned presence increments in Redis. This limitation is accepted as presence state is ephemeral and resets organically.
 
 ### Authentication Endpoints
 - `POST /api/auth/register`: Register with `{ name, email, password }`

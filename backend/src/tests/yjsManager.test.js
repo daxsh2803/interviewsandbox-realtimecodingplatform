@@ -22,6 +22,15 @@ describe('yjsManager Cleanup TTL', () => {
     jest.useRealTimers();
   });
 
+  afterAll(async () => {
+    try {
+      const { redisClient, closeRedis } = require('../db/redis');
+      if (redisClient && redisClient.isOpen) {
+        await closeRedis();
+      }
+    } catch (e) {}
+  });
+
   it('document remains after final socket disconnect before TTL', () => {
     const interviewId = 'int-1';
     const problemId = 'prob-1';

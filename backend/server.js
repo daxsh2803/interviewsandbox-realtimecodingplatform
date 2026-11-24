@@ -4,6 +4,7 @@ const config = require('./src/config');
 const { initSocket, getSocketIo } = require('./src/socket');
 const db = require('./src/db');
 const { closeRedis } = require('./src/db/redis');
+const { closeYjsSync } = require('./src/yjsManager');
 const reconciliationWorker = require('./src/services/reconciliationWorker');
 
 const server = http.createServer(app);
@@ -55,7 +56,12 @@ const gracefulShutdown = async (signal) => {
     await db.pool.end();
     console.log('PostgreSQL pool closed.');
 
-    // 4. Close Redis clients
+    // 4. Close Yjs distributed sync
+    console.log('Closing Yjs distributed sync...');
+    await closeYjsSync();
+    console.log('Yjs distributed sync closed.');
+
+    // 5. Close Redis clients
     console.log('Closing Redis clients...');
     await closeRedis();
     console.log('Redis clients closed.');

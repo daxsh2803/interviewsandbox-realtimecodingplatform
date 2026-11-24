@@ -7,21 +7,26 @@ const redisClient = redis.createClient({
 
 const pubClient = redisClient.duplicate();
 const subClient = redisClient.duplicate();
+const yjsSubClient = redisClient.duplicate();
 
 let isShuttingDown = false;
 redisClient.on('error', (err) => { if (!isShuttingDown) console.error('Redis Client Error', err); });
 pubClient.on('error', (err) => { if (!isShuttingDown) console.error('Redis PubClient Error', err); });
 subClient.on('error', (err) => { if (!isShuttingDown) console.error('Redis SubClient Error', err); });
+yjsSubClient.on('error', (err) => { if (!isShuttingDown) console.error('Redis YjsSubClient Error', err); });
 
 const connectPromise = Promise.all([
   redisClient.connect(),
   pubClient.connect(),
   subClient.connect(),
-]).catch((err) => console.error('Redis Connect Error', err));
+  yjsSubClient.connect(),
+]).catch((err) => {
+  if (!isShuttingDown) console.error('Redis Connect Error', err);
+});
 
 const closeRedis = async () => {
   isShuttingDown = true;
-  const clients = [redisClient, pubClient, subClient];
+  const clients = [redisClient, pubClient, subClient, yjsSubClient];
   for (const client of clients) {
     if (client) {
       client.removeAllListeners('error');
@@ -45,5 +50,7 @@ module.exports = {
   redisClient,
   pubClient,
   subClient,
+  yjsSubClient,
+  connectPromise,
   closeRedis,
 };

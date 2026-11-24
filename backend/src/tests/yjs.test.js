@@ -49,15 +49,35 @@ describe('Yjs Real-Time Collaboration', () => {
   // Give async Socket.IO disconnect handlers time to finish.
   await new Promise((resolve) => setTimeout(resolve, 100));
 
-  await require('../db/redis').closeRedis();
+  const { redisClient, closeRedis } = require('../db/redis');
+  try {
+    if (redisClient && redisClient.isOpen) {
+      const keys = await redisClient.keys('yjs:updates:*');
+      if (keys.length > 0) {
+        await redisClient.del(keys);
+      }
+    }
+  } catch (e) {}
+
+  await closeRedis();
 });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
     docs.clear();
 
     const { docSockets } = require('../yjsManager');
     if (docSockets) docSockets.clear();
+
+    const { redisClient } = require('../db/redis');
+    if (redisClient && redisClient.isOpen) {
+      try {
+        const keys = await redisClient.keys(`yjs:updates:${interviewId}:*`);
+        if (keys.length > 0) {
+          await redisClient.del(keys);
+        }
+      } catch (e) {}
+    }
 
     // Default DB behavior:
     // - Any problem is treated as assigned to the interview.
