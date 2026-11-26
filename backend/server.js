@@ -25,6 +25,8 @@ const gracefulShutdown = async (signal) => {
   console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
 
   reconciliationWorker.stop();
+  const { stopAllPolling } = require('./src/services/judge0PollingService');
+  stopAllPolling();
 
   const forceExitTimeout = setTimeout(() => {
     console.error('Graceful shutdown timed out (10s). Forcing exit.');

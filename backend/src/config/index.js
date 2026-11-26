@@ -58,6 +58,10 @@ module.exports = {
     memoryLimit:
       parseInt(process.env.JUDGE0_MEMORY_LIMIT, 10) || 128000,
     webhookPayloadLimit: process.env.JUDGE0_WEBHOOK_PAYLOAD_LIMIT || '5mb',
+    polling: {
+      intervalMs: parseInt(process.env.JUDGE0_POLL_INTERVAL_MS, 10) || 1000,
+      maxAttempts: parseInt(process.env.JUDGE0_POLL_MAX_ATTEMPTS, 10) || 15,
+    },
   },
 
   reconciliation: {

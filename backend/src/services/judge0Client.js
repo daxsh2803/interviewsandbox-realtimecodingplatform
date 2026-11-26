@@ -37,6 +37,20 @@ function mapJudge0Status(statusId) {
   return STATUS_MAP[statusId] || 'Internal Error';
 }
 
+function getJudge0Headers() {
+  const headers = {};
+  if (config.judge0.apiKey) {
+    headers['X-Auth-Token'] = config.judge0.apiKey;
+    if (config.judge0.baseUrl && config.judge0.baseUrl.includes('rapidapi')) {
+      headers['X-RapidAPI-Key'] = config.judge0.apiKey;
+      try {
+        headers['X-RapidAPI-Host'] = new URL(config.judge0.baseUrl).host;
+      } catch (_) {}
+    }
+  }
+  return headers;
+}
+
 /**
  * Submits code to Judge0 for asynchronous execution.
  * @param {Object} params - { sourceCode, language, stdin, executionId }
@@ -44,7 +58,8 @@ function mapJudge0Status(statusId) {
  */
 async function submitCode({ sourceCode, language, stdin, executionId, callbackUrlOverride }) {
   const language_id = getLanguageId(language);
-  const url = `${config.judge0.baseUrl}/submissions?base64_encoded=false&wait=false`;
+  const baseUrl = config.judge0.baseUrl ? config.judge0.baseUrl.replace(/\/+$/, '') : 'http://localhost:2358';
+  const url = `${baseUrl}/submissions?base64_encoded=false&wait=false`;
 
   const body = {
     source_code: sourceCode,
@@ -62,10 +77,8 @@ async function submitCode({ sourceCode, language, stdin, executionId, callbackUr
 
   const headers = {
     'Content-Type': 'application/json',
+    ...getJudge0Headers(),
   };
-  if (config.judge0.apiKey) {
-    headers['X-Auth-Token'] = config.judge0.apiKey;
-  }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -83,8 +96,38 @@ async function submitCode({ sourceCode, language, stdin, executionId, callbackUr
   return data.token;
 }
 
+/**
+ * Fetches submission status and output from Judge0.
+ * @param {string} token - Judge0 submission token
+ * @returns {Promise<Object>} submission details with Base64-encoded fields
+ */
+async function getSubmission(token) {
+  if (!token) {
+    throw new Error('Submission token is required');
+  }
+
+  const baseUrl = config.judge0.baseUrl ? config.judge0.baseUrl.replace(/\/+$/, '') : 'http://localhost:2358';
+  const url = `${baseUrl}/submissions/${token}?base64_encoded=true`;
+
+  const headers = getJudge0Headers();
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(`Judge0 getSubmission Failed: ${response.status} - ${text}`);
+    throw new Error(`Judge0 API error: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
 module.exports = {
   submitCode,
+  getSubmission,
   getLanguageId,
   mapJudge0Status,
 };

@@ -16,6 +16,15 @@ if (config.nodeEnv === 'production') {
 
 const pool = new Pool(poolConfig);
 
+const origEnd = pool.end.bind(pool);
+pool.end = async function (...args) {
+  try {
+    const { stopAllPolling } = require('../services/judge0PollingService');
+    stopAllPolling();
+  } catch (_) {}
+  return origEnd(...args);
+};
+
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle PostgreSQL client', err);
   process.exit(-1);

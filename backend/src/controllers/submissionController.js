@@ -152,11 +152,26 @@ exports.submitCode = async (req, res, next) => {
           placeholders.push({ resultId: insertRes.rows[0].id, tc });
         }
 
+        // Fetch driver_code if problem has it and candidate code is not standalone
+        const codeWrapper = require('../services/codeWrapper');
+        let codeToSubmit = sourceCode;
+        const probRes = await db.query('SELECT driver_code FROM problems WHERE id = $1', [problemId]);
+        if (probRes.rowCount > 0 && probRes.rows[0].driver_code) {
+          const driver = probRes.rows[0].driver_code[language.toLowerCase()];
+          if (driver) {
+            codeToSubmit = codeWrapper.wrapCode({
+              sourceCode,
+              language,
+              driverCode: driver,
+            });
+          }
+        }
+
         // Step 2: Submit to Judge0
         for (const { resultId, tc } of placeholders) {
           try {
             const token = await judge0Client.submitCode({
-              sourceCode,
+              sourceCode: codeToSubmit,
               language,
               stdin: tc.input,
               executionId: `subres-${resultId}`,
@@ -165,6 +180,12 @@ exports.submitCode = async (req, res, next) => {
                 : undefined
             });
             await db.query(`UPDATE submission_results SET judge0_token = $1 WHERE id = $2`, [token, resultId]);
+
+            // If callback cannot reach us (e.g. localhost), start polling fallback
+            const { shouldPollJudge0, pollSubmissionResult } = require('../services/judge0PollingService');
+            if (shouldPollJudge0()) {
+              pollSubmissionResult({ resultId, token });
+            }
           } catch (err) {
             console.error(`Failed to submit test case ${tc.id}:`, err);
             await db.query(`UPDATE submission_results SET status = 'Internal Error', stderr = $1 WHERE id = $2`, [err.message, resultId]);
@@ -180,6 +201,67 @@ exports.submitCode = async (req, res, next) => {
   }
 };
 
+// Shared idempotent submission result processor for both webhooks and polling fallback
+const processSubmissionResult = async ({ resultId, token, result, isBase64 }) => {
+  let { token: resToken, status, stdout, stderr, compile_output, time, memory } = result;
+  const effectiveToken = resToken || token;
+
+  if (isBase64) {
+    if (typeof stdout === 'string') stdout = Buffer.from(stdout, 'base64').toString('utf8');
+    if (typeof stderr === 'string') stderr = Buffer.from(stderr, 'base64').toString('utf8');
+    if (typeof compile_output === 'string') compile_output = Buffer.from(compile_output, 'base64').toString('utf8');
+  }
+
+  let appStatus = judge0Client.mapJudge0Status(status.id);
+  const finalStderr = compile_output ? (stderr ? compile_output + '\n' + stderr : compile_output) : stderr;
+
+  let updateRes;
+  if (resultId) {
+    updateRes = await db.query(
+      `UPDATE submission_results
+       SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5, judge0_token = COALESCE(judge0_token, $6)
+       WHERE id = $7 AND status = 'Processing'
+       RETURNING id, submission_id`,
+      [
+        appStatus,
+        stdout,
+        finalStderr,
+        time ? Math.round(parseFloat(time) * 1000) : null,
+        memory,
+        effectiveToken,
+        resultId
+      ]
+    );
+  } else {
+    updateRes = await db.query(
+      `UPDATE submission_results
+       SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
+       WHERE judge0_token = $6 AND status = 'Processing'
+       RETURNING id, submission_id`,
+      [
+        appStatus,
+        stdout,
+        finalStderr,
+        time ? Math.round(parseFloat(time) * 1000) : null,
+        memory,
+        effectiveToken
+      ]
+    );
+  }
+
+  if (updateRes.rowCount > 0) {
+    const { submission_id } = updateRes.rows[0];
+
+    // After updating, check if the submission is fully complete and update overall verdict
+    const subRes = await db.query('SELECT interview_id FROM submissions WHERE id = $1', [submission_id]);
+    if (subRes.rowCount > 0) {
+       await evaluateTestCases(submission_id, subRes.rows[0].interview_id);
+    }
+    return { updated: true, id: updateRes.rows[0].id, status: appStatus };
+  }
+  return { updated: false };
+};
+
 exports.submissionCallback = async (req, res, next) => {
   try {
     const incomingSecret = req.headers['x-judge0-callback-secret'] || req.query.secret;
@@ -193,65 +275,17 @@ exports.submissionCallback = async (req, res, next) => {
       return next(); // Pass to next handler if not submission type
     }
 
-    let { token, status, stdout, stderr, compile_output, time, memory } = req.body;
+    let { token, status } = req.body;
     if (!token || !status) {
       return res.status(400).json({ error: 'Missing token or status' });
     }
 
-    if (req.query.base64 === 'true') {
-      if (typeof stdout === 'string') stdout = Buffer.from(stdout, 'base64').toString('utf8');
-      if (typeof stderr === 'string') stderr = Buffer.from(stderr, 'base64').toString('utf8');
-      if (typeof compile_output === 'string') compile_output = Buffer.from(compile_output, 'base64').toString('utf8');
-    }
-
-    let appStatus = judge0Client.mapJudge0Status(status.id);
-    const finalStderr = compile_output ? (stderr ? compile_output + '\\n' + stderr : compile_output) : stderr;
-
-    let updateRes;
-    const internalId = req.query.id;
-
-    if (internalId) {
-      updateRes = await db.query(
-        `UPDATE submission_results
-         SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5, judge0_token = COALESCE(judge0_token, $6)
-         WHERE id = $7 AND status = 'Processing'
-         RETURNING id, submission_id`,
-        [
-          appStatus,
-          stdout,
-          finalStderr,
-          time ? Math.round(parseFloat(time) * 1000) : null,
-          memory,
-          token,
-          internalId
-        ]
-      );
-    } else {
-      updateRes = await db.query(
-        `UPDATE submission_results
-         SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
-         WHERE judge0_token = $6 AND status = 'Processing'
-         RETURNING id, submission_id`,
-        [
-          appStatus,
-          stdout,
-          finalStderr,
-          time ? Math.round(parseFloat(time) * 1000) : null,
-          memory,
-          token
-        ]
-      );
-    }
-
-    if (updateRes.rowCount > 0) {
-      const { submission_id } = updateRes.rows[0];
-
-      // After updating, check if the submission is fully complete and update overall verdict
-      const subRes = await db.query('SELECT interview_id FROM submissions WHERE id = $1', [submission_id]);
-      if (subRes.rowCount > 0) {
-         await evaluateTestCases(submission_id, subRes.rows[0].interview_id);
-      }
-    }
+    await processSubmissionResult({
+      resultId: req.query.id,
+      token,
+      result: req.body,
+      isBase64: req.query.base64 === 'true'
+    });
 
     res.status(200).send('OK');
   } catch (error) {
@@ -260,4 +294,5 @@ exports.submissionCallback = async (req, res, next) => {
   }
 };
 
+exports.processSubmissionResult = processSubmissionResult;
 exports.evaluateTestCases = evaluateTestCases;

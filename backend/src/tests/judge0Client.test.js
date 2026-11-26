@@ -44,4 +44,74 @@ describe('Judge0 Client', () => {
     // Callback URL and secret
     expect(body.callback_url).toContain(encodeURIComponent(config.judge0.callbackSecret));
   });
+
+  it('should fetch submission with base64_encoded=true and authorization headers', async () => {
+    const originalApiKey = config.judge0.apiKey;
+    config.judge0.apiKey = 'test-api-key';
+
+    try {
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          token: 'sub-token-abc',
+          status: { id: 3, description: 'Accepted' },
+          stdout: 'aGVsbG8=',
+        }),
+      });
+
+      const res = await judge0Client.getSubmission('sub-token-abc');
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const [url, options] = global.fetch.mock.calls[0];
+
+      expect(url).toBe(`${config.judge0.baseUrl.replace(/\/+$/, '')}/submissions/sub-token-abc?base64_encoded=true`);
+      expect(options.method).toBe('GET');
+      expect(options.headers['X-Auth-Token']).toBe('test-api-key');
+      expect(res.token).toBe('sub-token-abc');
+      expect(res.status.id).toBe(3);
+    } finally {
+      config.judge0.apiKey = originalApiKey;
+    }
+  });
+
+  it('should include RapidAPI headers when baseUrl contains rapidapi and apiKey is set', async () => {
+    const originalBaseUrl = config.judge0.baseUrl;
+    const originalApiKey = config.judge0.apiKey;
+
+    config.judge0.baseUrl = 'https://judge0-ce.p.rapidapi.com';
+    config.judge0.apiKey = 'rapidapi-key-123';
+
+    try {
+      global.fetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ token: 'token-rapidapi' }),
+      });
+
+      await judge0Client.getSubmission('token-rapidapi');
+
+      const [, options] = global.fetch.mock.calls[0];
+      expect(options.headers['X-RapidAPI-Key']).toBe('rapidapi-key-123');
+      expect(options.headers['X-RapidAPI-Host']).toBe('judge0-ce.p.rapidapi.com');
+    } finally {
+      config.judge0.baseUrl = originalBaseUrl;
+      config.judge0.apiKey = originalApiKey;
+    }
+  });
+
+  it('should throw an error if token is not provided to getSubmission', async () => {
+    await expect(judge0Client.getSubmission()).rejects.toThrow('Submission token is required');
+  });
+
+  it('should throw when getSubmission returns non-200', async () => {
+    global.fetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      text: async () => 'Submission not found',
+    });
+
+    await expect(judge0Client.getSubmission('non-existent-token')).rejects.toThrow(
+      'Judge0 API error: Not Found'
+    );
+  });
 });
