@@ -55,12 +55,21 @@ describe('Execution API', () => {
   });
 
   afterAll(async () => {
+    require('../services/judge0PollingService').stopAllPolling();
+    await new Promise(r => setTimeout(r, 50));
     await db.pool.end();
     await require('../db/redis').closeRedis();
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  beforeEach(async () => {
+    const { redisClient } = require('../db/redis');
+    if (redisClient && redisClient.isOpen && user) {
+      await redisClient.del(`ratelimit:execute:${user.id}`);
+    }
   });
 
   it('should submit code for execution', async () => {
@@ -335,5 +344,105 @@ describe('Execution API', () => {
         stdout: tooLargeStr
       });
     expect(resOver.status).toBe(413); // Payload Too Large
+  });
+
+  it('should return sample testcase input and expectedOutput when running function-only solution without custom stdin', async () => {
+    judge0Client.submitCode.mockResolvedValue('mock-token-sample');
+
+    // Create problem with driver and testcase
+    const probWithDriver = await db.query(
+      `INSERT INTO problems (title, description, difficulty, driver_code)
+       VALUES ('Two Sum Driver', 'Desc', 'EASY', $1) RETURNING id`,
+      [JSON.stringify({ javascript: '{{USER_CODE}}\n// driver' })]
+    );
+    const pId = probWithDriver.rows[0].id;
+    await db.query(
+      `INSERT INTO test_cases (problem_id, input, expected_output, is_hidden)
+       VALUES ($1, $2, $3, false)`,
+      [pId, '2 7 11 15\n9', '0 1']
+    );
+    await db.query(
+      `INSERT INTO interview_problems (interview_id, problem_id) VALUES ($1, $2)`,
+      [interview.id, pId]
+    );
+
+    const res = await request(app)
+      .post(`/api/interviews/${interview.id}/execute`)
+      .set('Cookie', `auth_token=${token}`)
+      .send({
+        problemId: pId,
+        language: 'javascript',
+        sourceCode: 'var twoSum = function(nums, target) { return [0, 1]; };'
+      });
+
+    expect(res.status).toBe(202);
+    expect(res.body.usedSampleTestCase).toBe(true);
+    expect(res.body.stdin).toBe('2 7 11 15\n9');
+    expect(res.body.expectedOutput).toBe('0 1');
+
+    // Check judge0Client was invoked with effectiveStdin
+    expect(judge0Client.submitCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stdin: '2 7 11 15\n9',
+        sourceCode: expect.stringContaining('var twoSum')
+      })
+    );
+  });
+
+  it('should use custom stdin and null expectedOutput when custom stdin is provided', async () => {
+    judge0Client.submitCode.mockResolvedValue('mock-token-custom');
+
+    const probRes = await db.query("SELECT id FROM problems WHERE title = 'Two Sum Driver' LIMIT 1");
+    const pId = probRes.rows[0].id;
+
+    const res = await request(app)
+      .post(`/api/interviews/${interview.id}/execute`)
+      .set('Cookie', `auth_token=${token}`)
+      .send({
+        problemId: pId,
+        language: 'javascript',
+        sourceCode: 'var twoSum = function(nums, target) { return [0, 1]; };',
+        stdin: '3 3\n6'
+      });
+
+    expect(res.status).toBe(202);
+    expect(res.body.usedSampleTestCase).toBe(false);
+    expect(res.body.stdin).toBe('3 3\n6');
+    expect(res.body.expectedOutput).toBeNull();
+
+    expect(judge0Client.submitCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stdin: '3 3\n6'
+      })
+    );
+  });
+
+  it('should bypass driver wrapping for debug snippets calling output directly', async () => {
+    judge0Client.submitCode.mockResolvedValue('mock-token-snippet');
+
+    const probRes = await db.query("SELECT id FROM problems WHERE title = 'Two Sum Driver' LIMIT 1");
+    const pId = probRes.rows[0].id;
+
+    const res = await request(app)
+      .post(`/api/interviews/${interview.id}/execute`)
+      .set('Cookie', `auth_token=${token}`)
+      .send({
+        problemId: pId,
+        language: 'javascript',
+        sourceCode: 'console.log("direct debug snippet");'
+      });
+
+    expect(res.status).toBe(202);
+    expect(res.body.usedSampleTestCase).toBe(false);
+    expect(res.body.stdin).toBe('');
+    expect(res.body.expectedOutput).toBeNull();
+
+    // Verify raw sourceCode was submitted to Judge0 unwrapped
+    expect(judge0Client.submitCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceCode: 'console.log("direct debug snippet");',
+        stdin: ''
+      })
+    );
   });
 });

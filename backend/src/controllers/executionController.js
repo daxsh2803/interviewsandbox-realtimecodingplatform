@@ -3,6 +3,21 @@ const judge0Client = require('../services/judge0Client');
 const { getSocketIo } = require('../socket');
 const config = require('../config');
 
+let hasStdinColCache = null;
+const checkHasStdinColumn = async () => {
+  if (hasStdinColCache !== null) return hasStdinColCache;
+  try {
+    const res = await db.query(
+      `SELECT 1 FROM information_schema.columns 
+       WHERE table_name = 'code_executions' AND column_name = 'stdin'`
+    );
+    hasStdinColCache = res.rowCount > 0;
+  } catch (err) {
+    hasStdinColCache = false;
+  }
+  return hasStdinColCache;
+};
+
 // 1. Submit Code Execution (POST /api/interviews/:interviewId/execute)
 exports.executeCode = async (req, res, next) => {
   try {
@@ -37,21 +52,12 @@ exports.executeCode = async (req, res, next) => {
       return res.status(403).json({ error: 'Interview is no longer active.' });
     }
 
-    // Create execution record in DB
-    const insertRes = await db.query(
-      `INSERT INTO code_executions 
-        (interview_id, user_id, problem_id, language, source_code, status)
-       VALUES ($1, $2, $3, $4, $5, 'Processing')
-       RETURNING id`,
-      [interviewId, userId, problemId, language, sourceCode]
-    );
-
-    const executionId = insertRes.rows[0].id;
-
-    // Determine effective code and stdin to send to Judge0
+    // Determine effective code, stdin, and sample test case usage
     const codeWrapper = require('../services/codeWrapper');
     let codeToExecute = sourceCode;
-    let effectiveStdin = stdin || '';
+    let effectiveStdin = (typeof stdin === 'string' && stdin.length > 0) ? stdin : '';
+    let usedSampleTestCase = false;
+    let expectedOutput = null;
 
     if (problemId && !codeWrapper.isStandaloneCode(sourceCode, language)) {
       const probRes = await db.query('SELECT driver_code FROM problems WHERE id = $1', [problemId]);
@@ -67,26 +73,53 @@ exports.executeCode = async (req, res, next) => {
           // Fall back to problem's first non-hidden test case input if stdin is empty
           if (!effectiveStdin || effectiveStdin.trim() === '') {
             const tcRes = await db.query(
-              `SELECT input FROM test_cases 
+              `SELECT input, expected_output FROM test_cases 
                WHERE problem_id = $1 AND is_hidden = false 
                ORDER BY created_at ASC LIMIT 1`,
               [problemId]
             );
             if (tcRes.rowCount > 0) {
               effectiveStdin = tcRes.rows[0].input;
+              expectedOutput = tcRes.rows[0].expected_output;
+              usedSampleTestCase = true;
             } else {
               const anyTcRes = await db.query(
-                `SELECT input FROM test_cases WHERE problem_id = $1 ORDER BY created_at ASC LIMIT 1`,
+                `SELECT input, expected_output FROM test_cases WHERE problem_id = $1 ORDER BY created_at ASC LIMIT 1`,
                 [problemId]
               );
               if (anyTcRes.rowCount > 0) {
                 effectiveStdin = anyTcRes.rows[0].input;
+                expectedOutput = anyTcRes.rows[0].expected_output;
+                usedSampleTestCase = true;
               }
             }
           }
         }
       }
     }
+
+    // Create execution record in DB (persisting effectiveStdin if column is present)
+    const hasStdin = await checkHasStdinColumn();
+    let insertRes;
+    if (hasStdin) {
+      insertRes = await db.query(
+        `INSERT INTO code_executions 
+          (interview_id, user_id, problem_id, language, source_code, stdin, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Processing')
+         RETURNING id`,
+        [interviewId, userId, problemId, language, sourceCode, effectiveStdin]
+      );
+    } else {
+      insertRes = await db.query(
+        `INSERT INTO code_executions 
+          (interview_id, user_id, problem_id, language, source_code, status)
+         VALUES ($1, $2, $3, $4, $5, 'Processing')
+         RETURNING id`,
+        [interviewId, userId, problemId, language, sourceCode]
+      );
+    }
+
+    const executionId = insertRes.rows[0].id;
 
     // Submit to Judge0 async
     judge0Client.submitCode({
@@ -118,7 +151,8 @@ exports.executeCode = async (req, res, next) => {
           io.to(`interview:${interviewId}`).emit('execution:updated', {
             executionId,
             status: 'Internal Error',
-            stderr: error.message
+            stderr: error.message,
+            stdin: effectiveStdin
           });
         }
       });
@@ -132,11 +166,14 @@ exports.executeCode = async (req, res, next) => {
       });
     }
 
-    // Return 202 immediately
+    // Return 202 immediately with effectiveStdin, expectedOutput, and usedSampleTestCase
     return res.status(202).json({
       message: 'Execution submitted',
       executionId,
-      status: 'Processing'
+      status: 'Processing',
+      stdin: effectiveStdin,
+      expectedOutput,
+      usedSampleTestCase
     });
 
   } catch (error) {
@@ -160,13 +197,15 @@ const processExecutionResult = async ({ executionId, token, result, isBase64 }) 
   const finalStderr = compile_output ? (stderr ? compile_output + '\n' + stderr : compile_output) : stderr;
 
   // Idempotent update: only update if status is currently 'Processing'
+  const hasStdin = await checkHasStdinColumn();
+  const returningCols = hasStdin ? 'id, interview_id, stdin' : 'id, interview_id';
   let updateRes;
   if (executionId) {
     updateRes = await db.query(
       `UPDATE code_executions
        SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5, judge0_token = COALESCE(judge0_token, $6)
        WHERE id = $7 AND status = 'Processing'
-       RETURNING id, interview_id`,
+       RETURNING ${returningCols}`,
       [
         appStatus,
         stdout,
@@ -182,7 +221,7 @@ const processExecutionResult = async ({ executionId, token, result, isBase64 }) 
       `UPDATE code_executions
        SET status = $1, stdout = $2, stderr = $3, execution_time_ms = $4, memory_bytes = $5
        WHERE judge0_token = $6 AND status = 'Processing'
-       RETURNING id, interview_id`,
+       RETURNING ${returningCols}`,
       [
         appStatus,
         stdout,
@@ -195,7 +234,7 @@ const processExecutionResult = async ({ executionId, token, result, isBase64 }) 
   }
 
   if (updateRes.rowCount > 0) {
-    const { id, interview_id } = updateRes.rows[0];
+    const { id, interview_id, stdin: rowStdin } = updateRes.rows[0];
 
     // Emit socket event to the interview room
     const io = getSocketIo();
@@ -206,7 +245,8 @@ const processExecutionResult = async ({ executionId, token, result, isBase64 }) 
         stdout,
         stderr: finalStderr,
         executionTimeMs: time ? Math.round(parseFloat(time) * 1000) : null,
-        memoryBytes: memory
+        memoryBytes: memory,
+        stdin: hasStdin ? rowStdin : undefined
       });
       io.to(`interview:${interview_id}`).emit('interview:activity', {
         type: 'execution_completed',

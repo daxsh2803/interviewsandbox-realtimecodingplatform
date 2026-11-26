@@ -294,6 +294,8 @@ a:hover {
   display: flex;
   flex-direction: column;
   min-width: 400px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Status Badges */
@@ -362,6 +364,8 @@ a:hover {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 .editor-toolbar {
   height: 40px;
@@ -374,21 +378,31 @@ a:hover {
 }
 .editor-wrapper {
   flex: 1;
+  min-height: 0;
 }
 
 /* Execution Panel */
 .execution-panel {
-  height: 200px;
+  min-height: 240px;
   border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   background-color: var(--bg-surface);
+  flex-shrink: 0;
 }
 .execution-toolbar {
   display: flex;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+  align-items: center;
+}
+
+.execution-toolbar button,
+.execution-toolbar .btn {
+  width: auto;
+  flex: 0 0 auto;
 }
 .execution-output {
   padding: 1rem;

@@ -16,15 +16,29 @@ const STANDALONE_PATTERNS = [
   /public\s+static\s+void\s+main/,
 ];
 
+const FUNCTION_OR_CLASS_PATTERN = /(?:\bfunction\b|=>|\bdef\s+|\bclass\b)/;
+const DIRECT_OUTPUT_PATTERN = /(?:console\.log|print\s*\(|std::cout|System\.out\.(?:print|println))/;
+
 /**
- * Checks whether user code is already a standalone script (reads stdin or has main).
+ * Checks whether user code is already a standalone script (reads stdin, has main,
+ * or is a direct debug snippet calling output without function/class definitions).
  * @param {string} sourceCode
  * @param {string} language
  * @returns {boolean}
  */
 function isStandaloneCode(sourceCode, language) {
   if (!sourceCode || typeof sourceCode !== 'string') return false;
-  return STANDALONE_PATTERNS.some((pattern) => pattern.test(sourceCode));
+
+  if (STANDALONE_PATTERNS.some((pattern) => pattern.test(sourceCode))) {
+    return true;
+  }
+
+  // Debug snippet edge case: direct output calls with no function/class definitions
+  if (DIRECT_OUTPUT_PATTERN.test(sourceCode) && !FUNCTION_OR_CLASS_PATTERN.test(sourceCode)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

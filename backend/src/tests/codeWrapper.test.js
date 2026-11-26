@@ -40,6 +40,20 @@ describe('codeWrapper Service', () => {
       expect(isStandaloneCode("class Solution {\npublic:\n    bool isPalindrome(int x) { return true; }\n};", 'cpp')).toBe(false);
       expect(isStandaloneCode("class Solution {\n    public boolean isPalindrome(int x) { return true; }\n}", 'java')).toBe(false);
     });
+
+    it('should detect direct debug snippets calling output without function/class definitions as standalone', () => {
+      expect(isStandaloneCode('console.log("hello world");', 'javascript')).toBe(true);
+      expect(isStandaloneCode('print("debug message")', 'python')).toBe(true);
+      expect(isStandaloneCode('std::cout << "hello" << std::endl;', 'cpp')).toBe(true);
+      expect(isStandaloneCode('System.out.println("debug");', 'java')).toBe(true);
+    });
+
+    it('should NOT treat functions with console.log or print as standalone debug snippets', () => {
+      expect(isStandaloneCode('function test() { console.log("debug"); }', 'javascript')).toBe(false);
+      expect(isStandaloneCode('const solve = () => { console.log(1); };', 'javascript')).toBe(false);
+      expect(isStandaloneCode('def solve():\n    print("hello")', 'python')).toBe(false);
+      expect(isStandaloneCode('class Solution:\n    def solve(self):\n        print("hello")', 'python')).toBe(false);
+    });
   });
 
   describe('wrapCode Transformation', () => {

@@ -143,7 +143,7 @@ function pollExecution({
         cleanup();
       }
     } catch (err) {
-      if (isStopped || pollGeneration !== generation) return;
+      if (isStopped || pollGeneration !== generation || (db.pool && (db.pool.ending || db.pool.ended)) || err.message?.includes('after calling end on the pool')) return;
       console.warn(`[Judge0 Polling] Execution ${executionId} attempt ${attempts} error:`, err.message);
       if (attempts < maxAttempts) {
         timerId = setTimeout(runPoll, intervalMs);
@@ -247,7 +247,7 @@ function pollSubmissionResult({
         cleanup();
       }
     } catch (err) {
-      if (isStopped || pollGeneration !== generation) return;
+      if (isStopped || pollGeneration !== generation || (db.pool && (db.pool.ending || db.pool.ended)) || err.message?.includes('after calling end on the pool')) return;
       console.warn(`[Judge0 Polling] Submission result ${resultId} attempt ${attempts} error:`, err.message);
       if (attempts < maxAttempts) {
         timerId = setTimeout(runPoll, intervalMs);
