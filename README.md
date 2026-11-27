@@ -1,250 +1,254 @@
 # Real-Time Collaborative Coding & Interview Platform
 
 ## Project Purpose
-A production-style full-stack platform for technical interviews where an interviewer and candidate can participate in a real-time collaborative coding session.
+A production-style full-stack platform for technical interviews where an interviewer and candidate participate in a real-time collaborative coding session with multi-language execution, automated evaluation, and peer synchronization.
 
-## Current Architecture
-The architecture follows a standard 3-tier model with specialized components for real-time collaboration and code execution. 
-- **PostgreSQL** is the persistent source of truth.
-- **Redis** is used for ephemeral state.
-- **Node.js/Express.js** acts as a stateless backend API.
-- **React/Vite** acts as the frontend SPA.
+## Architecture
+The platform follows a 3-tier architecture with dedicated distributed layers for real-time CRDT synchronization, ephemeral coordination, and sandboxed code execution:
+- **PostgreSQL**: Authoritative relational persistence for users, interviews, problems, test cases, code executions, submissions, and interviewer notes.
+- **Redis**: Distributed ephemeral state, Socket.io adapter for horizontal scaling, presence tracking, rate limiting, and distributed Yjs document update persistence (`yjs:updates:${interviewId}:${problemId}`).
+- **Node.js / Express**: Stateless backend API, Socket.io WebSocket server, and Judge0 execution coordinator with automatic localhost polling fallback.
+- **React / Vite**: Single-page application featuring the Monaco Editor, Yjs CRDT binding, tabbed execution console, and role-based participant controls.
+- **Judge0 CE**: Sandboxed code execution engine evaluating user code against sample and hidden test cases.
 
-## Current Technology Stack
-- **Frontend:** React, Vite, JavaScript
-- **Backend:** Node.js, Express.js
-- **Database:** PostgreSQL
-- **Ephemeral state:** Redis
-- **Infrastructure:** Docker, Docker Compose
+## Technology Stack
+- **Frontend:** React, Vite, Monaco Editor (`@monaco-editor/react`), Yjs, `y-monaco`
+- **Backend:** Node.js, Express.js, Socket.io, `@socket.io/redis-adapter`, Yjs
+- **Database:** PostgreSQL (`pg`)
+- **Ephemeral State & Cache:** Redis (`redis`)
+- **Execution Sandbox:** Judge0 API
+- **Infrastructure:** Docker, Docker Compose, Nginx, Let's Encrypt Certbot
+- **Testing:** Jest, Supertest
 
-## Current Project Status: Phase 9 — Redis / Distributed Real-Time State
-The platform has a functional PostgreSQL database schema, secure authentication, core REST APIs, a React frontend foundation, a Socket.io real-time transport layer, and a collaborative code editor powered by Yjs. We have introduced Redis as the ephemeral distributed state layer and prepared Socket.io for multi-instance operation.
+---
 
-### Architecture Boundaries
-- **PostgreSQL**: Persistent domain state (authoritative truth for domain models, auth, and problem metadata).
-- **Yjs**: Live collaborative document state (in-memory, synchronized across clients).
-- **Socket.io**: Real-time transport (WebSockets + polling fallback).
-- **Redis**: Ephemeral distributed coordination, Socket.io adapter, distributed presence tracking, and distributed Yjs document state persistence & cross-instance Pub/Sub synchronization.
+## Core Capabilities & Features
 
-### Distributed Yjs Architecture & Scalability
-- **Redis State Persistence & Hydration**: Yjs document updates are persisted as an append-only list in Redis (`yjs:updates:${interviewId}:${problemId}`) with an extensible TTL. When any backend instance loads a document that is not present in its local memory, it transparently hydrates state from Redis before computing sync steps for clients. Concurrent hydration requests are deduplicated in-flight.
-- **Cross-Instance Real-Time Convergence**: Local Yjs updates are published to Redis Pub/Sub (`yjs:sync:updates`) tagged with the originating `instanceId`. Peer instances apply remote updates using a dedicated transaction origin (`redis-pubsub`) to guarantee real-time CRDT convergence across instances without echo loops or redundant re-publishing.
-- **Elimination of Sticky-Session Requirement**: Multi-instance deployments no longer require load balancer session affinity (sticky sessions) for collaborative editing. Participants connected to different backend instances seamlessly collaborate and converge to the exact same document state.
-- **Redis Presence Orphan Limitation**: In the event of an ungraceful backend crash, Socket.io disconnect handlers will not fire, potentially leaving orphaned presence increments in Redis. This limitation is accepted as presence state is ephemeral and resets organically.
+### 1. LeetCode-Style Execution Harness (`codeWrapper.js`)
+- **Function-Only Submissions**: Candidates solve problems by writing clean, LeetCode-style function solutions without manual `stdin` parsing or `stdout` printing boilerplate.
+- **Multi-Language Support**: Supported across **JavaScript**, **Python**, **C++**, and **Java** via per-problem `starter_code` and `driver_code` templates stored in JSONB columns (`005_add_starter_and_driver_code.sql`).
+- **Template Placeholder Injection**: Driver templates use `{{USER_CODE}}` placeholders so languages like Java and C++ cleanly wrap candidate classes/functions with necessary imports, parsing drivers, and formatted outputs.
+- **Backward Compatibility**: Inspects submitted code before wrapping. If the solution directly reads `stdin` (e.g., `readFileSync`, `readline`, `input()`, `sys.stdin`, `cin`, `Scanner`), defines an entry point (`int main`, `public static void main`), or runs direct debug snippets (`console.log(...)`, `print(...)`), the driver wrapper is bypassed and the code executes as-is.
+- **Original Code Preservation**: The candidate's original unwrapped source code is recorded in `code_executions` and `submissions` tables—only the wrapped harness is dispatched to Judge0.
 
-### Authentication Endpoints
-- `POST /api/auth/register`: Register with `{ name, email, password }`
-- `POST /api/auth/login`: Login with `{ email, password }`. Sets HTTP-only `auth_token` cookie.
-- `GET /api/auth/me`: Returns the current authenticated user's profile.
-- `POST /api/auth/logout`: Clears the authentication cookie.
+### 2. Tabbed Execution Console & Custom Input
+- **Run Code vs. Submit**: Candidates test their solution against sample test cases via "Run Code", or run full automated grading against sample + hidden test cases via "Submit".
+- **Custom Input**: An interactive `Custom Input` tab allows candidates to provide custom `stdin` values. A visual indicator highlights when custom input is active.
+- **Transparent Output Display**: Side-by-side display of execution status, effective input (sample test case vs. custom input), expected output, and actual program output (`stdout` / `stderr`).
+- **Expandable Console**: Quick expand/collapse toggle for full console inspection without crowding the code editor.
 
-### Problem Endpoints
-- `POST /api/problems`: Create a new problem (Requires Auth)
-- `GET /api/problems`: List all problems (Requires Auth)
-- `GET /api/problems/:id`: Get specific problem (Requires Auth)
-- `PUT /api/problems/:id`: Update a problem (Requires Auth)
-- `DELETE /api/problems/:id`: Delete a problem (Requires Auth)
+### 3. Yjs-Safe Collaborative Starter Templates
+- **Hydration-Safe Auto-Fill**: Auto-inserts the problem's starter template only after initial Redis/Yjs synchronization completes (`isSynced = true`) and only when the editor is blank (`yText.length === 0`). Existing peer edits and hydrated sessions are never clobbered.
+- **Smart Language Switching**: Switching languages smoothly replaces the starter template if the current code is unmodified or empty, preserving written code if modifications were made.
+- **LF Line-Ending Enforcement**: Automatically enforces Monaco `EndOfLineSequence.LF` (`\n`) on Windows, eliminating character offset drift in `y-monaco`'s CR/LF translation.
+- **Peer-Synced Reset**: A dedicated `Reset Starter` button wipes and re-inserts the clean starter template in sequential transactions, accompanied by a confirmation prompt if user edits are present.
 
-### Interview Endpoints
-- `POST /api/interviews`: Create an interview (User becomes INTERVIEWER)
-- `GET /api/interviews`: List interviews the user is a participant of
-- `GET /api/interviews/:id`: Get interview details (Requires participant role)
-- `POST /api/interviews/:id/participants`: Add user to interview (Requires INTERVIEWER role)
-- `POST /api/interviews/:id/problems`: Assign problem to interview (Requires INTERVIEWER role)
-- `DELETE /api/interviews/:id/problems/:problemId`: Remove problem from interview (Requires INTERVIEWER role)
-- `PATCH /api/interviews/:id/status`: Update interview status (Requires INTERVIEWER role)
+### 4. Zero-Tunnel Local Development (Judge0 Polling Fallback)
+- **Automatic Fallback**: Hosted Judge0 cannot deliver webhook callbacks to local environments (`http://localhost:5000/...`). When `JUDGE0_CALLBACK_URL` contains `localhost`/`127.0.0.1` or `JUDGE0_ENABLE_POLLING=true`, the backend automatically polls Judge0 (`GET /submissions/:token`) until terminal status (`status.id >= 3`).
+- **Seamless Emission**: Polled results are routed through the exact same idempotent pipeline as webhooks, immediately emitting status updates to the frontend via Socket.io without requiring ngrok or public tunnels.
 
-### Frontend Architecture & Routing
-The frontend is built with React, Vite, and React Router, featuring a custom vanilla CSS design system (glassmorphism & dark mode).
-- **Global AuthContext**: Manages user state, login, registration, and logout. Automatically verifies session on load via `/api/auth/me`.
-- **API Client**: A centralized Axios-style fetch wrapper that natively includes HTTP-only credentials.
-- **Routes**:
-  - `/login`: Public route for user authentication.
-  - `/register`: Public route for account creation.
-  - `/dashboard`: Protected route requiring authentication, displays user profile and scheduled interviews.
-  - `/interviews/:id`: Protected workspace environment containing the coding interface.
+---
 
-### Workspace & Editor Configuration
-- **Monaco Editor**: Integrated `@monaco-editor/react`. Currently supports JavaScript, Python, Java, C++, and C for syntax highlighting.
-- **Problem Panel**: Fetches and renders problems assigned to the specific interview.
-- **Execution Panel**: UI placeholders for code execution, indicating future integration points with Judge0.
-### Socket.io Real-Time Architecture & Yjs Collaboration
-- **Transport**: `socket.io` provides real-time bi-directional transport natively bridging with the Express HTTP server.
-- **Authentication**: JWT is securely transferred via HTTP-only cookie automatically during handshake. Unauthenticated socket connections are rejected.
-- **Authorization**: The server explicitly checks `interview_participants` in PostgreSQL before permitting a socket to join a room (`interview:<id>`).
-- **Presence**: Tracks and broadcasts connected users (`interview:presence`). Currently in-memory and limited to a single backend instance (Redis integration pending).
-- **Yjs State Synchronization**: 
-  - Collaborative source code editing is powered by Yjs.
-  - The backend maintains an in-memory `Y.Doc` mapped by `interviewId:problemId`.
-  - Initial connection uses state vectors (`yjs:sync-step1`, `yjs:sync-step2`) for convergence.
-  - Granular updates are sent via `yjs:update` natively bridging over Socket.io.
-  - `y-monaco` natively binds the Yjs shared type (`Y.Text("sourceCode")`) to the Monaco editor instances.
-  - *Note: PostgreSQL is explicitly NOT updated on every keystroke. Snapshots, Redis distributed coordination, WebRTC, and code execution are pending.*
+## Database Migrations
 
-### Authentication & Authorization Design
-- **Passwords** are securely hashed using `bcryptjs` and never stored in plaintext.
-- **JWTs** do not store sensitive information (e.g., passwords).
-- **Cookies** are used to transport JWTs with `httpOnly`, `secure` (in prod), and `sameSite` flags.
-- **Role-based Authorization** is implemented via middleware to restrict access based on user roles within specific interviews (`interview_participants` table), rather than global user roles.
+Database migrations are tracked in the `migrations` table and run sequentially from `backend/src/db/migrations/`:
 
-### Environment Variables
-The `.env` file requires the following variables:
-- `DATABASE_URL`: Primary PostgreSQL connection string for development and production (e.g., `postgresql://postgres:postgres@localhost:5433/interview_db`).
-- `TEST_DATABASE_URL`: Dedicated PostgreSQL connection string for automated tests (e.g., `postgresql://postgres:postgres@localhost:5433/interview_sandbox_test`). Isolates Jest integration tests so development data and seeded problems are preserved across test runs.
-- `JWT_SECRET`: Secret used to sign JSON Web Tokens. Must be kept secure and configured per environment.
+| Migration | File | Description |
+|---|---|---|
+| `001` | `001_initial_schema.sql` | Core domain tables: `users`, `problems`, `test_cases`, `interviews`, `interview_participants`, `interview_problems`, `code_executions`. |
+| `002` | `002_add_judge0_token.sql` | Adds `judge0_token` to `code_executions` for asynchronous execution tracking. |
+| `003` | `003_submissions.sql` | Adds `submissions` and `submission_results` tables for full test suite evaluations. |
+| `004a` | `004_add_problem_ownership.sql` | Adds `created_by` foreign key column to `problems` for user-owned problem management. |
+| `004b` | `004_interviewer_notes.sql` | Adds `interviewer_notes` table for private interviewer candidate feedback. |
+| `005` | `005_add_starter_and_driver_code.sql` | Adds `starter_code` and `driver_code` JSONB columns to `problems` for multi-language execution harnesses. |
+| `006` | `006_add_stdin_to_code_executions.sql` | Adds `stdin` column to `code_executions` table for custom input persistence and auditing. |
 
-## Development Prerequisites
-- Node.js (v18+)
-- Docker and Docker Compose
+---
 
-## How to Run the Full Stack Locally (Docker)
-We use Docker Compose to run the entire application stack locally (Frontend, Backend, PostgreSQL, Redis).
+## API Endpoints
+
+### System & Health
+- `GET /api/health` - Service health status
+
+### Authentication
+- `POST /api/auth/register` - Register a new user
+- `POST /api/auth/login` - Authenticate user; sets HTTP-only `auth_token` cookie
+- `GET /api/auth/me` - Get authenticated user profile
+- `POST /api/auth/logout` - Clear authentication cookie
+
+### Problems
+- `POST /api/problems` - Create problem (Requires Auth)
+- `GET /api/problems` - List problems with pagination (Excludes `driver_code`)
+- `GET /api/problems/:id` - Get problem details (Excludes `driver_code`)
+- `PUT /api/problems/:id` - Update owned problem
+- `DELETE /api/problems/:id` - Delete owned problem
+
+### Interviews & Session Controls
+- `POST /api/interviews` - Create interview (Creator assigned `INTERVIEWER` role)
+- `GET /api/interviews` - List user's interviews
+- `GET /api/interviews/:id` - Get interview metadata, participants, and assigned problems
+- `POST /api/interviews/:id/participants` - Add participant (`CANDIDATE` or `INTERVIEWER`)
+- `POST /api/interviews/:id/problems` - Assign problem to interview
+- `DELETE /api/interviews/:id/problems/:problemId` - Remove problem from interview
+- `PATCH /api/interviews/:id/status` - Update interview status (`WAITING`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`)
+- `POST /api/interviews/:id/lock` - Lock/unlock editor for candidates (INTERVIEWER only)
+- `GET /api/interviews/:id/lock` - Get editor lock status
+- `POST /api/interviews/:id/active-problem` - Set active problem for interview (INTERVIEWER only)
+- `GET /api/interviews/:id/active-problem` - Get active problem
+
+### Code Execution & Submissions
+- `POST /api/interviews/:id/execute` - Execute code against sample test case or custom input (Rate limited: 5 req/10s)
+- `POST /api/interviews/:id/problems/:problemId/submit` - Submit code against full test suite (hidden + sample) (Rate limited: 5 req/10s)
+- `PUT /api/executions/judge0/callback` - Webhook callback receiver for Judge0 worker results
+- `GET /api/interviews/:id/problems/:problemId/test-cases` - List problem test cases (INTERVIEWER only)
+- `POST /api/interviews/:id/problems/:problemId/test-cases` - Create problem test case (INTERVIEWER only)
+- `DELETE /api/interviews/:id/problems/:problemId/test-cases/:testCaseId` - Delete test case (INTERVIEWER only)
+
+### Reports & Interviewer Notes
+- `GET /api/interviews/:id/report` - Get interview summary report and statistics
+- `GET /api/interviews/:id/submissions` - Get submission history for interview
+- `GET /api/interviews/:id/snapshots` - Get code snapshots
+- `GET /api/interviews/:id/notes` - Get interviewer evaluation notes (INTERVIEWER only)
+- `PUT /api/interviews/:id/notes` - Create or update private interviewer evaluation notes (INTERVIEWER only)
+
+---
+
+## Environment Variables
+The application uses the following environment variables (configured via `.env`):
+- `PORT`: Backend server HTTP port (default: `5000`).
+- `NODE_ENV`: Runtime environment (`development`, `production`, `test`).
+- `DATABASE_URL`: Primary PostgreSQL connection string (e.g., `postgresql://postgres:postgres@localhost:5433/interview_db`).
+- `TEST_DATABASE_URL`: Dedicated PostgreSQL connection string for automated testing (e.g., `postgresql://postgres:postgres@localhost:5433/interview_sandbox_test`). Isolates Jest integration tests from development data.
+- `REDIS_URL`: Redis connection string for ephemeral state and Socket.io adapter (e.g., `redis://localhost:6379`).
+- `JWT_SECRET`: Secret key used for signing authentication JWT cookies.
+- `JUDGE0_BASE_URL`: Base URL for the Judge0 CE API (e.g., `https://ce.judge0.com` or `http://localhost:2358`).
+- `JUDGE0_API_KEY`: RapidAPI or self-hosted API key for Judge0 (optional if unauthenticated).
+- `JUDGE0_CALLBACK_URL`: Webhook URL for Judge0 execution callbacks (e.g., `http://localhost:5000/api/executions/judge0/callback` locally, or public IP / domain in production).
+- `JUDGE0_CALLBACK_SECRET`: Secret header/query token for authenticating Judge0 callbacks.
+- `JUDGE0_CPU_TIME_LIMIT` / `JUDGE0_WALL_TIME_LIMIT` / `JUDGE0_MEMORY_LIMIT`: Sandboxed resource constraints.
+- `JUDGE0_ENABLE_POLLING`: Explicitly enables polling fallback for missed webhooks or local development (auto-enabled when `JUDGE0_CALLBACK_URL` is `localhost` / `127.0.0.1`).
+- `VITE_API_URL`: Backend API URL consumed by the Vite frontend (e.g., `http://localhost:5000`).
+- `VITE_SOCKET_URL`: WebSocket URL consumed by the frontend (e.g., `ws://localhost:5000`).
+
+---
+
+## Local Development & Setup
 
 ### Prerequisites
-- Docker and Docker Compose
-- Node.js (only for local development outside Docker)
+- Node.js (v18+)
+- Docker and Docker Compose (or local PostgreSQL & Redis)
 
-### Startup Instructions
-1. Copy the environment template to create your local `.env` file:
+### Step-by-Step Setup
+
+1. **Configure Environment:**
    ```bash
    cp .env.example .env
    ```
-   *(Note: Populate `JWT_SECRET` and other placeholders as needed for testing).*
 
-2. Build and start the stack:
+2. **Start Database & Ephemeral State (Docker):**
    ```bash
-   docker compose up --build -d
+   docker compose up -d postgres redis
+   ```
+   *PostgreSQL listens on `localhost:5433`, Redis listens on `localhost:6379`.*
+
+3. **Run Database Migrations & Seed Data:**
+   ```bash
+   npm --prefix backend run migrate
+   npm --prefix backend run seed
+   ```
+   *The seed script populates 4 initial LeetCode problems (Two Sum, Reverse String, Valid Parentheses, Palindrome Number) with multi-language starter code, test drivers, and sample/hidden test cases.*
+
+4. **Start Development Servers:**
+   ```bash
+   # Option A: Run concurrently from repository root
+   npm run dev
+
+   # Option B: Run in separate terminals
+   npm --prefix backend run dev   # Port 5000
+   npm --prefix frontend run dev  # Port 5173
    ```
 
-3. Access the application:
-   - **Frontend**: [http://localhost:8080](http://localhost:8080)
-   - **Backend API**: [http://localhost:5000/api](http://localhost:5000/api)
+5. **Access Applications:**
+   - Frontend: [http://localhost:5173](http://localhost:5173)
+   - Backend API: [http://localhost:5000/api](http://localhost:5000/api)
 
-4. To view logs for a specific service (e.g., backend):
-   ```bash
-   docker compose logs -f backend
-   ```
+---
 
-5. To stop the stack:
-   ```bash
-   docker compose down
-   ```
+## Automated Testing & Verification
 
-### Data Persistence and Reset
-- The database and Redis data are preserved in Docker volumes (`postgres_data`, `redis_data`).
-- To completely reset the database and ephemeral state, run:
-  ```bash
-  docker compose down -v
-  ```
+The backend test suite runs against a dedicated test database (`interview_sandbox_test`), completely isolated from development and seeded data.
 
-### Limitations & Caveats
-- **Local Container Testing vs Public Deployment**: This `docker-compose.yml` binds PostgreSQL and Redis to your local machine's ports (`5433` and `6379`) for easy debugging. In a true production environment, these ports should **not** be exposed to the public internet.
-- **Frontend Build Configuration**: The frontend (`interview_frontend`) uses a multi-stage Docker build and is served statically by Nginx. The Nginx reverse proxy routes `/api` and `/socket.io` directly to the backend container. Because Vite variables are embedded at build time, `VITE_API_URL=/api` is passed as a build argument in the Dockerfile.
-- **Yjs State**: Collaborative coding sessions (Yjs documents) are stored in-memory on the backend. Restarting the backend container will clear active coding sessions.
-- **Judge0 Webhooks & Localhost Polling Fallback**: In production, Judge0 delivers execution results asynchronously via webhooks to `JUDGE0_CALLBACK_URL`. When developing locally against hosted Judge0 (`https://ce.judge0.com`), webhooks cannot reach `localhost`; the backend automatically detects localhost/127.0.0.1 callback URLs (or `JUDGE0_ENABLE_POLLING=true`) and activates an automatic polling fallback (`GET /submissions/:token`) until terminal status (`status.id >= 3`), immediately emitting results via Socket.IO without requiring tunneling tools.
-- **Graceful Shutdown**: The backend server is configured to handle `SIGINT` and `SIGTERM` signals for graceful shutdown. It stops accepting new HTTP connections, cleanly disconnects Socket.io clients, and ends PostgreSQL and Redis connections with a 10s timeout to prevent hanging.
-- **Rate Limiting**:
-  - **Auth Routes (`/register`, `/login`)**: Protected by a Redis-backed distributed IP-based rate limiter (`ratelimit:auth:${ip}`) (default: 10 reqs / 15 mins). Limits sync across horizontally scaled backend instances and persist across process restarts. Sets standard rate-limit headers (`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After`).
-  - **Execution Routes (`/execute`, `/submit`)**: Protected by a Redis-based rate limiter per authenticated user (`ratelimit:execute:${userId}`) (default: 5 reqs / 10 secs).
-  - **Reverse Proxy Client IP Resolution (`TRUST_PROXY`)**: Express `trust proxy` setting is configurable via `TRUST_PROXY` (defaulting to `1` for single-hop reverse proxies like Nginx and AWS ALB), ensuring `req.ip` reflects the real client IP.
-  - Rate limits can be configured via environment variables (`AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `EXEC_RATE_LIMIT_WINDOW_MS`, `EXEC_RATE_LIMIT_MAX`, `TRUST_PROXY`).
-- **Production Configuration Validation**: If `NODE_ENV=production`, the application will immediately crash on startup if critical environment variables (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`) are missing or using insecure fallback defaults.
+```bash
+# Run full backend test suite in-band
+npm --prefix backend test
+
+# Build frontend production bundle
+npm --prefix frontend run build
+```
+
+### Test Suite Status
+- **Test Suites:** 19 passed, 19 total
+- **Tests:** 170 passed, 170 total
+- **Handles:** 0 open handles (clean teardown across database pools, Redis clients, and polling timers)
+- **Key Suites:**
+  - `auth.test.js` - JWT authentication, bcrypt password hashing, HTTP-only cookies
+  - `problem.test.js` - Problem CRUD, ownership checks, `starter_code` delivery, and `driver_code` confidentiality
+  - `interview.test.js` - Participant authorization, problem assignments, and role checks
+  - `execution.test.js` - Code wrapper execution, test case matching, and custom input handling
+  - `judge0Polling.test.js` - Polling fallback lifecycle, terminal status resolution, and clean timer cancellation
+  - `yjsManager.test.js` & `yjs_multi_instance.test.js` - CRDT hydration from Redis, multi-instance pub/sub sync, and deduplication
+  - `rateLimiter.test.js` - Distributed IP auth rate limiter and per-user execution limits
+
+---
+
+## Continuous Integration (CI)
+GitHub Actions is configured to run automated CI checks on every `push` to `main` and `pull_request` targeting `main`:
+- Validates dependency installation (`npm ci`), runs the backend test suite using Jest, and compiles the frontend production build (`npm run build`).
+- **Test Database Isolation**: Tests run against `interview_sandbox_test` (configured via `TEST_DATABASE_URL`). In CI environments where only `DATABASE_URL` is set, `initTestDb.js` safely falls back to `DATABASE_URL`.
+
+---
 
 ## AWS EC2 Production Deployment
 
-This project includes a production-ready Docker Compose configuration (`docker-compose.prod.yml`) intended for a single-server AWS EC2 deployment using Ubuntu Linux.
+This project includes a production Docker Compose configuration (`docker-compose.prod.yml`) and Nginx TLS reverse proxy (`nginx/nginx.prod.conf`) for single-server AWS EC2 deployments with automated Let's Encrypt SSL.
 
-### 1. Server Setup
-
-Provision an AWS EC2 instance (Ubuntu) and configure its Security Group to allow inbound traffic on:
-- **Port 80 (HTTP)** for frontend access.
-- **Port 22 (SSH)** for secure server management.
-
-Do **not** open ports 5432, 6379, or 5000 to the internet. The production configuration correctly isolates these internal services on the Docker network.
-
-Install Docker and Docker Compose on your EC2 instance.
+### 1. Server Setup & Security Group
+Provision an Ubuntu EC2 instance and configure inbound security group rules:
+- **Port 80 (HTTP)**: Let's Encrypt ACME challenges & automatic 301 HTTPS redirection.
+- **Port 443 (HTTPS)**: TLS 1.2/1.3 encrypted application traffic.
+- **Port 22 (SSH)**: Administrative access.
+*(Do **not** expose ports 5432, 6379, or 5000 to the public internet).*
 
 ### 2. Configuration (`.env`)
+Clone the repository to your EC2 instance, copy `.env.example`, and set production variables:
+- `POSTGRES_PASSWORD`: Strong database password.
+- `DATABASE_URL`: `postgresql://postgres:<PASSWORD>@postgres:5432/interview_db`.
+- `JWT_SECRET`: Cryptographically secure random secret.
+- `JUDGE0_CALLBACK_SECRET`: Secret token for webhooks.
+- `JUDGE0_CALLBACK_URL`: `http://<EC2-PUBLIC-IP-OR-DOMAIN>/api/executions/judge0/callback`.
+- `VITE_FRONTEND_URL`: `https://<YOUR-DOMAIN>`.
 
-Clone the repository to your EC2 instance and create a production `.env` file from the example:
+### 3. Let's Encrypt Initial Certificate Setup
+Ensure your domain's DNS A-record points to the EC2 public IP. Request the initial certificate in standalone mode before starting the frontend container:
 ```bash
-cp .env.example .env
+docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot -p 80:80 certbot certonly --standalone \
+  --cert-name interview-sandbox \
+  --email your-email@example.com \
+  --agree-tos --no-eff-email \
+  -d yourdomain.com -d www.yourdomain.com
 ```
 
-Update the following critical environment variables for production:
-- `POSTGRES_PASSWORD`: A strong password for the database.
-- `DATABASE_URL`: Must match the PostgreSQL configuration. Ensure the password is URL-encoded if it contains special characters. Example: `postgresql://postgres:<URL_ENCODED_PASSWORD>@postgres:5432/interview_db`.
-- `JWT_SECRET`: Generate a long, cryptographically secure random string.
-- `JUDGE0_CALLBACK_SECRET`: Generate a secure string for webhooks.
-- `JUDGE0_BASE_URL`: The URL of the public Judge0 API you are using.
-- `JUDGE0_CALLBACK_URL`: Must be reachable by the public Judge0 instance. Do not use `localhost`. Set this to your EC2 instance's public IP address, e.g., `http://<EC2-PUBLIC-IP>/api/executions/judge0/callback`.
-- `VITE_FRONTEND_URL`: Update to `http://<EC2-PUBLIC-IP>`.
-
-*Note: Redis persistence has been disabled in the production configuration because it is only used for ephemeral rate limiting and Socket.io coordination. Redis data does not need to survive container restarts.*
-
-### 3. Build and Start Production Services
-
-The production Compose file ensures proper port bindings (`80:80`), limits exposed ports, and includes `restart: unless-stopped` policies.
-
+### 4. Build, Start & Run Migrations
 ```bash
+# Build and start services in background
 docker compose -f docker-compose.prod.yml up --build -d
-```
 
-### 4. Database Setup & Migrations
-
-To apply the initial PostgreSQL database schema, you must run the migration script inside the backend container after the services have started:
-
-```bash
+# Apply database migrations
 docker compose -f docker-compose.prod.yml exec backend npm run migrate
 ```
-*(This command safely applies pending SQL files from `src/db/migrations` using a migrations tracking table. It is safe to run multiple times and prevents duplicate execution.)*
 
-### 5. Production HTTPS / SSL Deployment (Let's Encrypt & Certbot)
-
-Production deployments use `docker-compose.prod.yml` and `nginx/nginx.prod.conf` for TLS 1.2/1.3 termination, automatic HTTP-to-HTTPS redirection, security headers, and automated Let's Encrypt certificate renewal via Certbot.
-
-#### Ingress & Security Architecture:
-- **Port 80 (HTTP)**: Handles the Let's Encrypt ACME challenge path (`/.well-known/acme-challenge/`) for certificate issuance and renewal; returns a `301 Moved Permanently` redirect to HTTPS for all other traffic.
-- **Port 443 (HTTPS)**: Terminates TLS 1.2/1.3 with secure cipher suites, sets HSTS (`Strict-Transport-Security`), `X-Content-Type-Options: nosniff`, and `X-Frame-Options: SAMEORIGIN`, proxies `/api/` and `/socket.io/` to the backend container with WebSocket upgrades (`Upgrade: websocket`, `Connection: upgrade`, `X-Forwarded-*`), and serves the SPA frontend.
-- **Automated Certificate Renewal**: A dedicated `certbot` container runs a renewal daemon checking every 12 hours (`certbot renew`) against shared Docker volumes (`certbot_etc`, `certbot_var`, `certbot_www`).
-
-#### Step-by-Step Initial SSL Certificate Setup:
-1. Ensure your domain's DNS A-record points to your EC2 instance's public IP address.
-2. Request the initial certificate using Certbot in standalone mode on port 80 **before starting the frontend container** (ensure port 80 is free):
-   ```bash
-   docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot -p 80:80 certbot certonly --standalone \
-     --cert-name interview-sandbox \
-     --email your-email@example.com \
-     --agree-tos --no-eff-email \
-     -d yourdomain.com -d www.yourdomain.com
-   ```
-   *(Note: Passing `--cert-name interview-sandbox` guarantees the certificate is generated under `/etc/letsencrypt/live/interview-sandbox/`, directly matching the paths pre-configured in `nginx/nginx.prod.conf`.)*
-
-3. Build and start the full production stack:
-   ```bash
-   docker compose -f docker-compose.prod.yml up --build -d
-   ```
-
-4. Certificate Renewals & Nginx Reload:
-   The `certbot` container continuously checks and renews certificates every 12 hours via the shared ACME challenge webroot (`certbot_www`). After a renewal occurs, reload Nginx with zero downtime:
-   ```bash
-   docker compose -f docker-compose.prod.yml exec frontend nginx -s reload
-   ```
-
-## Continuous Integration (CI)
-GitHub Actions is configured to run automated CI checks:
-- Triggers on every `push` to `main`.
-- Triggers on every `pull_request` targeting `main`.
-- Validates the current project foundation: verifies clean dependency installation (`npm ci`), verifies backend source code validity, and compiles the frontend production build.
-- A failed CI workflow indicates an issue in the foundation that must be resolved before merging.
-- The workflow automatically runs the backend test suite using Jest to ensure code correctness and prevent regressions.
-
-### Automated Testing & Test Database Isolation
-Backend integration tests run against a dedicated, isolated test database (`interview_sandbox_test`) configured via `TEST_DATABASE_URL`:
-- **Run Tests**: `npm --prefix backend test` (automatically initializes and runs migrations against `interview_sandbox_test` if missing, then executes Jest).
-- **Manual Setup**: `npm --prefix backend run db:test:setup` (creates `interview_sandbox_test` and applies pending migrations).
-- **CI Compatibility**: In CI environments where only `DATABASE_URL` is set, tests safely fall back to `DATABASE_URL`.
-
-## Architecture Documentation
-Detailed system architecture and technical design specifications are available in [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
-
+### 5. Automated Certificate Renewal
+The `certbot` container continuously checks and renews certificates every 12 hours via the shared ACME challenge webroot. To reload Nginx after renewal with zero downtime:
+```bash
+docker compose -f docker-compose.prod.yml exec frontend nginx -s reload
+```
