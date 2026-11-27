@@ -64,13 +64,17 @@ describe('Problem Endpoints', () => {
 
   describe('GET /api/problems', () => {
     it('should get all problems with default pagination', async () => {
-      db.query.mockResolvedValueOnce({ rows: [{ id: '1' }] }); // SELECT problems
+      db.query.mockResolvedValueOnce({
+        rows: [{ id: '1', starter_code: { javascript: '// starter' } }]
+      }); // SELECT problems
       db.query.mockResolvedValueOnce({ rows: [{ count: '1' }] }); // SELECT COUNT
 
       const res = await authHeader(request(app).get('/api/problems'));
 
       expect(res.status).toBe(200);
       expect(res.body.problems.length).toBe(1);
+      expect(res.body.problems[0].starter_code).toBeDefined();
+      expect(res.body.problems[0].driver_code).toBeUndefined();
       expect(res.body.pagination.page).toBe(1);
       expect(res.body.pagination.limit).toBe(50);
       expect(res.body.pagination.total).toBe(1);
@@ -90,12 +94,16 @@ describe('Problem Endpoints', () => {
 
   describe('GET /api/problems/:id', () => {
     it('should get a problem by id', async () => {
-      db.query.mockResolvedValueOnce({ rows: [{ id: '1' }] });
+      db.query.mockResolvedValueOnce({
+        rows: [{ id: '1', starter_code: { javascript: '// starter' } }]
+      });
 
       const res = await authHeader(request(app).get('/api/problems/1'));
 
       expect(res.status).toBe(200);
       expect(res.body.problem.id).toBe('1');
+      expect(res.body.problem.starter_code).toBeDefined();
+      expect(res.body.problem.driver_code).toBeUndefined();
     });
 
     it('should return 404 for nonexistent problem', async () => {

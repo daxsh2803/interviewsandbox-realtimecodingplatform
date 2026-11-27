@@ -12,11 +12,25 @@ export const useYjsProvider = (interviewId, problemId, socketStatus, isInterview
 
     const socket = getSocket();
     const ydoc = new Y.Doc();
+    ydoc.isSynced = false;
+    ydoc.problemId = problemId;
     setDoc(ydoc);
+
+    let syncTimeout = null;
+
+    const markSynced = () => {
+      if (!ydoc.isSynced) {
+        ydoc.isSynced = true;
+        ydoc.emit('synced', [true]);
+      }
+    };
 
     const onSyncStep2 = (payload) => {
       if (payload.interviewId === interviewId && payload.problemId === problemId) {
-        Y.applyUpdate(ydoc, new Uint8Array(payload.update), 'socket');
+        if (payload.update && payload.update.length > 0) {
+          Y.applyUpdate(ydoc, new Uint8Array(payload.update), 'socket');
+        }
+        markSynced();
       }
     };
 
@@ -28,6 +42,7 @@ export const useYjsProvider = (interviewId, problemId, socketStatus, isInterview
 
     const onYjsError = (payload) => {
       console.error('Yjs Error:', payload.message);
+      markSynced();
     };
 
     socket.on('yjs:sync-step2', onSyncStep2);
@@ -41,6 +56,11 @@ export const useYjsProvider = (interviewId, problemId, socketStatus, isInterview
       problemId,
       stateVector: Array.from(stateVector)
     });
+
+    // Safety fallback: if sync response isn't received within 1500ms, mark synced
+    syncTimeout = setTimeout(() => {
+      markSynced();
+    }, 1500);
 
     // Send local updates to server
     const handleLocalUpdate = (update, origin) => {
@@ -56,6 +76,7 @@ export const useYjsProvider = (interviewId, problemId, socketStatus, isInterview
     ydoc.on('update', handleLocalUpdate);
 
     return () => {
+      if (syncTimeout) clearTimeout(syncTimeout);
       socket.off('yjs:sync-step2', onSyncStep2);
       socket.off('yjs:update', onUpdate);
       socket.off('yjs:error', onYjsError);

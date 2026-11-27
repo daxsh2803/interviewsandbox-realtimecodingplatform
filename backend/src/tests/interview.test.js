@@ -102,6 +102,15 @@ describe('Interview Endpoints', () => {
       db.query.mockImplementation((queryStr) => {
         if (queryStr.includes('FROM interview_participants')) return Promise.resolve({ rows: [{ role: 'CANDIDATE' }] });
         if (queryStr.includes('FROM interviews')) return Promise.resolve({ rows: [{ id: '1', title: 'Test' }] });
+        if (queryStr.includes('FROM interview_problems')) return Promise.resolve({
+          rows: [{
+            id: 'prob_1',
+            title: 'Two Sum',
+            description: 'desc',
+            difficulty: 'EASY',
+            starter_code: { javascript: 'var twoSum = function() {};' }
+          }]
+        });
         return Promise.resolve({ rows: [] });
       });
 
@@ -111,6 +120,9 @@ describe('Interview Endpoints', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.interview.id).toBe('1');
+      expect(res.body.interview.problems).toHaveLength(1);
+      expect(res.body.interview.problems[0].starter_code).toBeDefined();
+      expect(res.body.interview.problems[0].driver_code).toBeUndefined();
     });
   });
 

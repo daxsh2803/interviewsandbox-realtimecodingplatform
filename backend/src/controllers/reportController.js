@@ -25,7 +25,7 @@ exports.getInterviewReport = async (req, res, next) => {
     `, [id]);
 
     const problemsRes = await db.query(`
-      SELECT p.*
+      SELECT p.id, p.title, p.description, p.difficulty, p.created_by, p.created_at, p.starter_code
       FROM interview_problems ip
       JOIN problems p ON ip.problem_id = p.id
       WHERE ip.interview_id = $1

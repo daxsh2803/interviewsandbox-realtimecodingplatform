@@ -15,7 +15,7 @@ exports.createProblem = async (req, res, next) => {
     const userId = req.user.userId;
 
     const result = await db.query(
-      'INSERT INTO problems (title, description, difficulty, created_by) VALUES ($1, $2, $3, $4) RETURNING *',
+      'INSERT INTO problems (title, description, difficulty, created_by) VALUES ($1, $2, $3, $4) RETURNING id, title, description, difficulty, created_by, created_at, starter_code',
       [title, description, difficulty, userId]
     );
 
@@ -34,7 +34,7 @@ exports.getProblems = async (req, res, next) => {
     const offset = (page - 1) * limit;
 
     const result = await db.query(
-      'SELECT * FROM problems ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      'SELECT id, title, description, difficulty, created_by, created_at, starter_code FROM problems ORDER BY created_at DESC LIMIT $1 OFFSET $2',
       [limit, offset]
     );
 
@@ -58,7 +58,7 @@ exports.getProblems = async (req, res, next) => {
 exports.getProblem = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const result = await db.query('SELECT * FROM problems WHERE id = $1', [id]);
+    const result = await db.query('SELECT id, title, description, difficulty, created_by, created_at, starter_code FROM problems WHERE id = $1', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Problem not found' });
@@ -96,7 +96,7 @@ exports.updateProblem = async (req, res, next) => {
     }
 
     const result = await db.query(
-      'UPDATE problems SET title = $1, description = $2, difficulty = $3 WHERE id = $4 RETURNING *',
+      'UPDATE problems SET title = $1, description = $2, difficulty = $3 WHERE id = $4 RETURNING id, title, description, difficulty, created_by, created_at, starter_code',
       [title, description, difficulty, id]
     );
 

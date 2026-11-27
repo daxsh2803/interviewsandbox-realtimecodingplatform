@@ -285,6 +285,7 @@ export const InterviewWorkspace = () => {
             setLanguage={setLanguage}
             yDoc={yDoc}
             readOnly={(userRole !== 'INTERVIEWER' && editorLocked) || isCompleted}
+            activeProblem={interview?.problems?.find(p => p.id === activeProblemId)}
           />
           <ExecutionPanel 
             yDoc={yDoc}
